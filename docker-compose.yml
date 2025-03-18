@@ -1,0 +1,16 @@
+version: '3.4'
+
+services:
+  mcpslackbot:
+    image: mcpslackbot
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    environment:
+      NODE_ENV: production
+      BEARER_TOKEN: ${BEARER_TOKEN}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+    ports:
+      - 3001:3001

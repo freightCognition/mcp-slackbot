@@ -1,0 +1,34 @@
+{
+  "name": "mcp-slackbot",
+  "version": "2.1.1",
+  "description": "freight.Cognition open-source app to execute Carrier Risk Assessments, with the MCP API, from within your Slack environment.",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js",
+    "pm2:start": "pm2 start app.js --name mcp-slackbot",
+    "pm2:stop": "pm2 stop mcp-slackbot",
+    "pm2:restart": "pm2 restart mcp-slackbot",
+    "pm2:logs": "pm2 logs mcp-slackbot",
+    "pm2:status": "pm2 status",
+    "test:token": "node test_token.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.4",
+    "body-parser": "^1.20.2",
+    "crypto": "^1.0.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "pm2": "^5.3.1",
+    "raw-body": "^2.5.2",
+    "tsscmp": "^1.0.6"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
+  },
+  "keywords": [],
+  "author": "",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
