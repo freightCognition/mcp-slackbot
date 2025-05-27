@@ -3,19 +3,32 @@ const axios = require('axios');
 const crypto = require('crypto');
 const rawBody = require('raw-body');
 const timingSafeCompare = require('tsscmp');
+const fs = require('fs');
+const path = require('path');
+const qs = require('qs');
 require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 3001;
 
 // Environment variables
-const BEARER_TOKEN = process.env.BEARER_TOKEN;
+let BEARER_TOKEN = process.env.BEARER_TOKEN;
+let REFRESH_TOKEN = process.env.REFRESH_TOKEN;
+const TOKEN_ENDPOINT_URL = process.env.TOKEN_ENDPOINT_URL;
 const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET;
 const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
 
 // Verify required environment variables
 if (!BEARER_TOKEN) {
   console.error('BEARER_TOKEN environment variable is required');
+  process.exit(1);
+}
+if (!REFRESH_TOKEN) {
+  console.error('REFRESH_TOKEN environment variable is required');
+  process.exit(1);
+}
+if (!TOKEN_ENDPOINT_URL) {
+  console.error('TOKEN_ENDPOINT_URL environment variable is required');
   process.exit(1);
 }
 
@@ -108,6 +121,72 @@ const verifySlackRequest = (req, res, next) => {
   next();
 };
 
+// Helper function to update .env file
+const envFilePath = path.resolve(__dirname, '.env');
+function updateEnvFile(updatedValues) {
+  try {
+    let envContent = fs.readFileSync(envFilePath, 'utf8');
+    Object.entries(updatedValues).forEach(([key, value]) => {
+      const regex = new RegExp(`^${key}=.*$`, 'm');
+      if (envContent.match(regex)) {
+        envContent = envContent.replace(regex, `${key}=${value}`);
+      } else {
+        envContent += `\n${key}=${value}`;
+      }
+    });
+    fs.writeFileSync(envFilePath, envContent);
+    console.log('.env file updated successfully.');
+  } catch (err) {
+    console.error('Error writing to .env file:', err);
+  }
+}
+
+// Function to refresh the access token
+async function refreshAccessToken() {
+  console.log('Attempting to refresh access token...');
+  try {
+    const data = qs.stringify({
+      grant_type: 'refresh_token',
+      refresh_token: REFRESH_TOKEN
+    });
+
+    const response = await axios.post(TOKEN_ENDPOINT_URL, data, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      }
+    });
+
+    const newAccessToken = response.data.access_token;
+    const newRefreshToken = response.data.refresh_token;
+
+    if (!newAccessToken) {
+      throw new Error('New access token not found in refresh response');
+    }
+
+    console.log('Access token refreshed successfully.');
+    BEARER_TOKEN = newAccessToken;
+    process.env.BEARER_TOKEN = newAccessToken;
+    updateEnvFile({ BEARER_TOKEN: newAccessToken });
+
+    if (newRefreshToken) {
+      console.log('New refresh token received.');
+      REFRESH_TOKEN = newRefreshToken;
+      process.env.REFRESH_TOKEN = newRefreshToken;
+      updateEnvFile({ REFRESH_TOKEN: newRefreshToken });
+    } else {
+      console.warn('New refresh token was not provided in the response. Old refresh token will be reused.');
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error refreshing access token:', error.response ? JSON.stringify(error.response.data, null, 2) : error.message);
+    if (error.response && error.response.status === 400) {
+      console.error('Refresh token might be invalid or expired. Manual intervention may be required.');
+    }
+    return false;
+  }
+}
+
 app.post('/slack/commands', verifySlackRequest, async (req, res) => {
   const { text, response_url } = req.body;
 
@@ -116,83 +195,127 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
   }
 
   const mcNumber = text.trim();
+  let attempt = 0;
+  const maxAttempts = 2;
 
-  try {
-    console.log(`Fetching data for MC number: ${mcNumber}`);
-    const response = await axios.post(
-      'https://mycarrierpacketsapi-stage.azurewebsites.net/api/v1/Carrier/PreviewCarrier',
-      null,
-      {
-        params: { docketNumber: mcNumber },
-        headers: {
-          Authorization: `Bearer ${BEARER_TOKEN}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 10000 // 10 seconds timeout
+  while (attempt < maxAttempts) {
+    try {
+      console.log(`Fetching data for MC number: ${mcNumber}, attempt ${attempt + 1}`);
+      const apiResponse = await axios.post(
+        'https://mycarrierpacketsapi-stage.azurewebsites.net/api/v1/Carrier/PreviewCarrier',
+        null,
+        {
+          params: { docketNumber: mcNumber },
+          headers: {
+            Authorization: `Bearer ${BEARER_TOKEN}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 10000
+        }
+      );
+
+      if (!apiResponse.data || apiResponse.data.length === 0) {
+        console.log(`No data found for MC number: ${mcNumber}`);
+        return res.send('No data found for the provided MC number.');
       }
-    );
 
-    if (!response.data || response.data.length === 0) {
-      console.log(`No data found for MC number: ${mcNumber}`);
-      return res.send('No data found for the provided MC number.');
-    }
+      const data = apiResponse.data[0];
+      console.log(`Data received for MC number: ${mcNumber}`);
 
-    const data = response.data[0];
-    console.log(`Data received for MC number: ${mcNumber}`, JSON.stringify(data, null, 2));
-
-    const blocks = [
-      {
-        type: "header",
-        text: {
-          type: "plain_text",
-          text: "MyCarrierPortal Risk Assessment",
-          emoji: true
-        }
-      },
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: `*${data.CompanyName || 'N/A'}*\nDOT: ${data.DotNumber || 'N/A'} / MC: ${data.DocketNumber || 'N/A'}`
-        }
-      },
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: `*Overall assessment:* ${getRiskLevelEmoji(data.RiskAssessmentDetails?.TotalPoints)} ${getRiskLevel(data.RiskAssessmentDetails?.TotalPoints)}`
-        }
-      },
-      {
-        type: "context",
-        elements: [
-          {
-            type: "mrkdwn",
-            text: `Total Points: ${data.RiskAssessmentDetails?.TotalPoints || 'N/A'}`
+      const blocks = [
+        {
+          type: "header",
+          text: {
+            type: "plain_text",
+            text: "MyCarrierPortal Risk Assessment",
+            emoji: true
           }
-        ]
-      },
-      {
-        type: "divider"
+        },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `*${data.CompanyName || 'N/A'}*\nDOT: ${data.DotNumber || 'N/A'} / MC: ${data.DocketNumber || 'N/A'}`
+          }
+        },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `*Overall assessment:* ${getRiskLevelEmoji(data.RiskAssessmentDetails?.TotalPoints)} ${getRiskLevel(data.RiskAssessmentDetails?.TotalPoints)}`
+          }
+        },
+        {
+          type: "context",
+          elements: [
+            {
+              type: "mrkdwn",
+              text: `Total Points: ${data.RiskAssessmentDetails?.TotalPoints || 'N/A'}`
+            }
+          ]
+        },
+        {
+          type: "divider"
+        }
+      ];
+
+      const categories = ['Authority', 'Insurance', 'Operation', 'Safety', 'Other'];
+      categories.forEach(category => {
+        const categoryData = data.RiskAssessmentDetails?.[category];
+        if (categoryData) {
+          blocks.push(
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: `*${category}:* ${getRiskLevelEmoji(categoryData.TotalPoints)} ${getRiskLevel(categoryData.TotalPoints)}`
+              }
+            },
+            {
+              type: "context",
+              elements: [
+                {
+                  type: "mrkdwn",
+                  text: `Risk Level: ${getRiskLevel(categoryData.TotalPoints)} | Points: ${categoryData.TotalPoints}\nInfractions:\n${formatInfractions(categoryData.Infractions)}`
+                }
+              ]
+            }
+          );
+        }
+      });
+
+      // Add MyCarrierProtect section
+      const mcpData = {
+        TotalPoints: (data.IsBlocked ? 1000 : 0) + (data.FreightValidateStatus === 'Review Recommended' ? 1000 : 0), 
+        OverallRating: getRiskLevel((data.IsBlocked ? 1000 : 0) + (data.FreightValidateStatus === 'Review Recommended' ? 1000 : 0)),
+        Infractions: [] 
+      };
+      if (data.IsBlocked) {
+        mcpData.Infractions.push({
+          Points: 1000,
+          RiskLevel: 'Review Required',
+          RuleText: 'MyCarrierProtect: Blocked',
+          RuleOutput: 'Carrier blocked by 3 or more companies'
+        });
       }
-    ];
+      if (data.FreightValidateStatus === 'Review Recommended') {
+        mcpData.Infractions.push({
+          Points: 1000,
+          RiskLevel: 'Review Required',
+          RuleText: 'FreightValidate Status',
+          RuleOutput: 'Carrier has a FreightValidate Review Recommended status'
+        });
+      }
 
-    // Add sections for each risk assessment category with enhanced details
-    const categories = ['Authority', 'Insurance', 'Operation', 'Safety', 'Other'];
-    categories.forEach(category => {
-      const categoryData = data.RiskAssessmentDetails?.[category];
-      if (categoryData) {
-        let detailsText = `Risk Level: ${getRiskLevel(categoryData.TotalPoints)} | Points: ${categoryData.TotalPoints}`;
-
-        // Add formatted infractions
-        detailsText += `\nInfractions:\n${formatInfractions(categoryData.Infractions)}`;
-
+      if (mcpData.TotalPoints > 0) {
+        let mcpDetailsText = `Risk Level: ${mcpData.OverallRating} | Points: ${mcpData.TotalPoints}`;
+        mcpDetailsText += `\nInfractions:\n${formatInfractions(mcpData.Infractions)}`;
         blocks.push(
           {
             type: "section",
             text: {
               type: "mrkdwn",
-              text: `*${category}:* ${getRiskLevelEmoji(categoryData.TotalPoints)} ${getRiskLevel(categoryData.TotalPoints)}`
+              text: `*MyCarrierProtect:* ${getRiskLevelEmoji(mcpData.TotalPoints)} ${mcpData.OverallRating}`
             }
           },
           {
@@ -200,7 +323,7 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
             elements: [
               {
                 type: "mrkdwn",
-                text: detailsText
+                text: mcpDetailsText
               }
             ]
           },
@@ -209,98 +332,57 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
           }
         );
       }
-    });
 
-    // Add MyCarrierProtect section
-    const mcpData = {
-      TotalPoints: (data.IsBlocked ? 1000 : 0) + (data.FreightValidateStatus === 'Review Recommended' ? 1000 : 0), 
-      OverallRating: getRiskLevel((data.IsBlocked ? 1000 : 0) + (data.FreightValidateStatus === 'Review Recommended' ? 1000 : 0)),
-      Infractions: [] 
-    };
-    if (data.IsBlocked) {
-      mcpData.Infractions.push({
-        Points: 1000,
-        RiskLevel: 'Review Required',
-        RuleText: 'MyCarrierProtect: Blocked',
-        RuleOutput: 'Carrier blocked by 3 or more companies'
-      });
-    }
-    if (data.FreightValidateStatus === 'Review Recommended') {
-      mcpData.Infractions.push({
-        Points: 1000,
-        RiskLevel: 'Review Required',
-        RuleText: 'FreightValidate Status',
-        RuleOutput: 'Carrier has a FreightValidate Review Recommended status'
-      });
-    }
+      const slackResponse = {
+        response_type: 'in_channel',
+        blocks: blocks
+      };
 
-    if (mcpData.TotalPoints > 0) {
-      let mcpDetailsText = `Risk Level: ${mcpData.OverallRating} | Points: ${mcpData.TotalPoints}`;
-      mcpDetailsText += `\nInfractions:\n${formatInfractions(mcpData.Infractions)}`;
-      blocks.push(
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `*MyCarrierProtect:* ${getRiskLevelEmoji(mcpData.TotalPoints)} ${mcpData.OverallRating}`
+      console.log(`Sending Slack response for MC number: ${mcNumber}`);
+      
+      // Send immediate acknowledgment
+      res.send();
+
+      // Send detailed response via webhook
+      try {
+        await axios.post(SLACK_WEBHOOK_URL, slackResponse, { 
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 5000 
+        });
+      } catch (webhookError) {
+        console.error('Error sending webhook response:', webhookError);
+        // Try fallback to response_url if webhook fails
+        if (response_url) {
+          try {
+            await axios.post(response_url, slackResponse, { timeout: 5000 });
+          } catch (fallbackError) {
+            console.error('Error sending fallback response:', fallbackError);
           }
-        },
-        {
-          type: "context",
-          elements: [
-            {
-              type: "mrkdwn",
-              text: mcpDetailsText
-            }
-          ]
-        },
-        {
-          type: "divider"
-        }
-      );
-    }
-
-    const slackResponse = {
-      response_type: 'in_channel',
-      blocks: blocks
-    };
-
-    console.log(`Sending Slack response for MC number: ${mcNumber}`);
-    
-    // Send immediate acknowledgment
-    res.send();
-
-    // Send detailed response via webhook
-    try {
-      await axios.post(SLACK_WEBHOOK_URL, slackResponse, { 
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 5000 
-      });
-    } catch (webhookError) {
-      console.error('Error sending webhook response:', webhookError);
-      // Try fallback to response_url if webhook fails
-      if (response_url) {
-        try {
-          await axios.post(response_url, slackResponse, { timeout: 5000 });
-        } catch (fallbackError) {
-          console.error('Error sending fallback response:', fallbackError);
         }
       }
+
+      return;
+    } catch (error) {
+      if (error.response && error.response.status === 401 && attempt < maxAttempts - 1) {
+        console.log('Access token expired or invalid. Attempting refresh...');
+        const refreshed = await refreshAccessToken();
+        if (refreshed) {
+          console.log('Token refreshed. Retrying API call...');
+          attempt++;
+        } else {
+          console.error('Failed to refresh token. Aborting.');
+          return res.send("Error: Could not refresh authentication. Please check logs or contact admin.");
+        }
+      } else {
+        console.error('API call failed or max retries reached:', error.response ? JSON.stringify(error.response.data, null, 2) : error.message);
+        let userMessage = 'Error fetching data. Please try again later.';
+        if (error.response && error.response.status === 401) {
+            userMessage = 'Authentication failed even after attempting to refresh. Please contact an administrator.';
+        }
+        return res.send(userMessage);
+      }
     }
-  } catch (error) {
-    console.error('Error fetching carrier data:', error);
-    let errorMessage = 'Failed to retrieve carrier data. Please try again.';
-    if (error.response) {
-      console.error('API response error:', error.response.status, error.response.data);
-      errorMessage = `API error: ${error.response.status} - ${JSON.stringify(error.response.data)}`;
-    } else if (error.request) {
-      console.error('No response received:', error.request);
-      errorMessage = 'No response received from the API. Please try again later.';
-    } else if (error.code === 'ECONNABORTED') {
-      errorMessage = 'The request timed out. Please try again later.';
-    }
-    res.status(500).send(errorMessage);
-  }
+  } // end while loop
 });
 
 // Add basic health check endpoint
