@@ -11,7 +11,9 @@
     "pm2:restart": "pm2 restart mcp-slackbot",
     "pm2:logs": "pm2 logs mcp-slackbot",
     "pm2:status": "pm2 status",
-    "test:token": "node test_token.js"
+    "test:token": "node test_token.js",
+    "lint": "eslint .",
+    "lint:fix": "eslint --fix ."
   },
   "dependencies": {
     "axios": "^1.7.4",
@@ -24,6 +26,9 @@
     "tsscmp": "^1.0.6"
   },
   "devDependencies": {
+    "@eslint/js": "^9.27.0",
+    "eslint": "^9.27.0",
+    "globals": "^16.2.0",
     "nodemon": "^3.0.3"
   },
   "keywords": [],
