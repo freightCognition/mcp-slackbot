@@ -1,0 +1,109 @@
+name: Deploy to Production
+
+# Trigger the workflow on push to main branch
+on:
+  push:
+    branches: [ main ]
+  # Allow manual triggering from GitHub UI
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to Production Server
+    # This ensures it runs on your self-hosted runner
+    runs-on: self-hosted
+    
+    steps:
+    # Step 1: Checkout the latest code
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    # Step 2: Stop the existing container (if running)
+    - name: Stop existing container
+      run: |
+        if docker ps -q -f name=mcpslackbot; then
+          echo "Stopping existing container..."
+          docker stop mcpslackbot || true
+          docker rm mcpslackbot || true
+        else
+          echo "No existing container found"
+        fi
+      continue-on-error: true
+      
+    # Step 3: Remove old Docker image (optional, saves space)
+    - name: Remove old Docker image
+      run: |
+        if docker images -q mcpslackbot; then
+          echo "Removing old image..."
+          docker rmi mcpslackbot || true
+        fi
+      continue-on-error: true
+      
+    # Step 4: Build new Docker image
+    - name: Build Docker image
+      run: |
+        echo "Building new Docker image..."
+        docker build -t mcpslackbot .
+        
+    # Step 5: Create .env file with secrets
+    - name: Create environment file
+      run: |
+        echo "Creating .env file..."
+        cat > .env << EOF
+        NODE_ENV=production
+        PORT=3001
+        BEARER_TOKEN=${{ secrets.BEARER_TOKEN }}
+        REFRESH_TOKEN=${{ secrets.REFRESH_TOKEN }}
+        TOKEN_ENDPOINT_URL=${{ secrets.TOKEN_ENDPOINT_URL }}
+        SLACK_SIGNING_SECRET=${{ secrets.SLACK_SIGNING_SECRET }}
+        SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}
+        EOF
+        
+    # Step 6: Start new container
+    - name: Start new container
+      run: |
+        echo "Starting new container..."
+        docker run -d \
+          --name mcpslackbot \
+          --restart unless-stopped \
+          -p 3001:3001 \
+          --env-file .env \
+          mcpslackbot
+          
+    # Step 7: Wait a moment and check if container is running
+    - name: Verify deployment
+      run: |
+        echo "Waiting for container to start..."
+        sleep 10
+        
+        if docker ps -q -f name=mcpslackbot; then
+          echo "✅ Container is running successfully!"
+          docker ps -f name=mcpslackbot
+          
+          # Test the health endpoint
+          echo "Testing health endpoint..."
+          if curl -f http://localhost:3001/health; then
+            echo "✅ Health check passed!"
+          else
+            echo "❌ Health check failed!"
+            exit 1
+          fi
+        else
+          echo "❌ Container failed to start!"
+          echo "Container logs:"
+          docker logs mcpslackbot
+          exit 1
+        fi
+        
+    # Step 8: Clean up .env file for security
+    - name: Clean up
+      run: |
+        rm -f .env
+        echo "Cleaned up temporary files"
+      if: always()
+      
+    # Step 9: Send notification (optional)
+    - name: Deployment notification
+      run: |
+        echo "🚀 Deployment completed successfully!"
+        echo "Application is now running on $(hostname) at port 3001"
