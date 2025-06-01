@@ -104,13 +104,13 @@ To use this bot, you need to create a Slack App:
     *   Navigate to "Features" -> "Slash Commands".
     *   Click "Create New Command".
     *   **Command:** `/mcp` (or your preferred command)
-    *   **Request URL:** `https://your-public-url.com/slack/events` (This needs to be the publicly accessible URL where your bot is running. For local development, you'll need a tunneling service like ngrok: `ngrok http 3001`).
+    *   **Request URL:** `https://your-public-url.com/slack/commands` (This needs to be the publicly accessible URL where your bot is running. For local development, you'll need a tunneling service like ngrok: `ngrok http 3001`).
     *   **Short Description:** e.g., "Fetch MCP Carrier Risk Assessment"
     *   Save the command.
 5.  **Event Subscriptions (Optional but Recommended for more interactive features):**
     *   Navigate to "Features" -> "Event Subscriptions".
     *   Toggle "Enable Events" to ON.
-    *   **Request URL:** `https://your-public-url.com/slack/events` (same as for slash commands). The URL will be verified.
+    *   **Request URL:** `https://your-public-url.com/slack/events` (If using Event Subscriptions, update this to your events endpoint. It's often the same as Slash Commands but can be different). The URL will be verified.
     *   You might subscribe to specific bot events if needed by your bot's functionality.
 6.  **Permissions (OAuth & Permissions):**
     *   Navigate to "Features" -> "OAuth & Permissions".
