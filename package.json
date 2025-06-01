@@ -1,7 +1,7 @@
 {
   "name": "mcp-slackbot",
-  "version": "2.1.1",
-  "description": "freight.Cognition open-source app to execute Carrier Risk Assessments, with the MCP API, from within your Slack environment.",
+  "version": "2.1.2",
+  "description": "freightCognition open-source app to execute Carrier Risk Assessments, with the MyCarrierPortal API, from within your Slack environment.",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
