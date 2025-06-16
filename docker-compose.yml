@@ -1,17 +1,26 @@
-version: '3.4'
-
+version: '3.8'
 services:
-  mcpslackbot:
-    image: mcpslackbot
+  mcp-slackbot-py: # Renamed service for Python version
     build:
       context: .
-      dockerfile: ./Dockerfile
-    environment:
-      NODE_ENV: production
-      BEARER_TOKEN: ${BEARER_TOKEN}
-      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
-      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET}
-      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+      dockerfile: Dockerfile
+    container_name: mcp-slackbot-py
     ports:
-      - 3001:3001
+      # Maps the container's PORT (set by ENV in Dockerfile or .env, default 3000)
+      # to the host's EXTERNAL_PORT (or 3000 if EXTERNAL_PORT is not set on host).
+      # Example: run with `EXTERNAL_PORT=4000 docker-compose up` to map to host port 4000.
+      - "${EXTERNAL_PORT:-3000}:${PORT:-3000}"
+    env_file:
+      - .env # Loads environment variables from .env file located in the project root
+             # This is the primary way to provide runtime configuration to the container.
+    environment:
+      # Ensures PORT inside the container is also set, defaults to 3000 if not in .env.
+      # This value will be used by uvicorn's --port $PORT argument.
+      - PORT=${PORT:-3000}
+    # If you need live reloading during development with uvicorn --reload,
+    # you can mount the source code. For production, code is copied in Dockerfile.
+    # volumes:
+    #   - ./src:/app/src
     restart: unless-stopped
+# The docker-compose.debug.yml.example is for Node.js and is not updated here.
+# Python debugging would require a different setup (e.g., using debugpy).

@@ -1,0 +1,4 @@
+slack_bolt
+httpx
+python-dotenv
+uvicorn[standard]

@@ -1,24 +1,95 @@
-**/.classpath
-**/.dockerignore
-**/.env
-**/.git
-**/.gitignore
-**/.project
-**/.settings
-**/.toolstarget
-**/.vs
-**/.vscode
-**/*.*proj.user
-**/*.dbmdl
-**/*.jfm
-**/charts
-**/docker-compose*
-**/compose*
-**/Dockerfile*
-**/node_modules
-**/npm-debug.log
-**/obj
-**/secrets.dev.yaml
-**/values.dev.yaml
-LICENSE
-README.md
+# Python specific
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.eggs/
+*.egg-info/
+*.egg
+dist/
+build/
+*.local
+*.log
+
+# IDE and OS specific
+.DS_Store
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Docker specific - prevent these from being added to context repeatedly
+Dockerfile
+docker-compose.yml
+docker-compose.debug.yml.example
+
+# Sensitive files
+.env
+*.env.local
+secrets/
+*.pem
+*.key
+
+# Git specific
+.git/
+.gitignore
+
+# Node specific (cleaning up from previous project)
+node_modules/
+npm-debug.log
+package-lock.json
+# Keep package.json if it's used for scripts, but node_modules should definitely be ignored.
+
+# Test outputs
+htmlcov/
+.pytest_cache/
+.tox/
+nosetests.xml
+coverage.xml
+
+# Other project files (adjust as needed)
+# README.md # Usually good to keep READMEs out of images unless needed
+# docs/
+# examples/
+# tests/ # If tests are not part of the runtime image
+
+# Previously existing entries from problem description (some are redundant)
+# .dockerignore # This file itself
+# .github # GitHub actions and workflows, not needed in image
+# MCP-Slackbot-Screenshot.png # Image assets
+# README.md
+# app.js # Old Node.js app file
+# docker-compose.debug.yml.example
+# docker-compose.yml
+# eslint.config.mjs
+# license.txt
+# main.py # If this is an old file not part of src/
+# mcp-slackbot-flow.png
+# mcp-slackbot-flow.svg
+# package.json
+# pyproject.toml # Build system config, not needed in runtime if deps are installed
+# requirements.txt # Copied separately in Dockerfile
+# src/ # Copied separately in Dockerfile
+# tests/ # Test files, usually not in prod image unless used for smoke tests
+
+# Specific files from original .dockerignore that should be kept if relevant
+.env.example # Copied to image, so should not be ignored here if that's intended.
+             # The prompt copies it, so I will not ignore it here.
+             # If it was not to be copied, it would be ignored.
+
+# Final cleanup: ensure only files needed for runtime are included.
+# If pyproject.toml and requirements.txt are only for build stage,
+# they could be ignored *if* using multi-stage Docker builds and they aren't needed later.
+# For this simple Dockerfile, requirements.txt is needed. pyproject.toml might be if uv uses it.
+# Let's keep pyproject.toml for now.
+
+# Ensure the .github directory is ignored for the build context
+.github/
