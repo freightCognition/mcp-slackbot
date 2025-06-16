@@ -1,17 +1,18 @@
-# MCP Slackbot
+# MCP Slackbot (Python Version)
 
-A Slack bot for executing Carrier Risk Assessments using the MyCarrierPortal API within your Slack environment.
+A Slack bot for executing Carrier Risk Assessments using the MyCarrierPortal API within your Slack environment. This version is built with Python using the Bolt for Python framework.
 
-*Brought to you by Anthony Fecarotta of freightCognition & linehaul.ai*
+*Original concept by Anthony Fecarotta of freightCognition & linehaul.ai*
 
-![MCP Slackbot Screenshot](./MCP-Slackbot-Screenshot.png)
+![MCP Slackbot Screenshot](./MCP-Slackbot-Screenshot.png) <!-- Assuming screenshot is still relevant -->
 
 ## Prerequisites
 
 - Docker and Docker Compose (Recommended)
 - A Slack workspace with permissions to add apps
 - MyCarrierPortal API access (including Bearer Token, Refresh Token, and Token Endpoint URL)
-- Node.js >= 18.0.0 (if not using Docker)
+- Python >= 3.10 (if not using Docker)
+- `uv` (Python project and environment manager, if not using Docker)
 
 ## Quick Start with Docker Compose
 
@@ -25,26 +26,17 @@ A Slack bot for executing Carrier Risk Assessments using the MyCarrierPortal API
         ```bash
         cp .env.example .env
         ```
-    *   Edit `.env` and fill in your credentials:
-        *   `BEARER_TOKEN`: Your MyCarrierPortal API bearer token.
-        *   `REFRESH_TOKEN`: Your MyCarrierPortal API refresh token.
-        *   `TOKEN_ENDPOINT_URL`: The URL for the MyCarrierPortal token endpoint (e.g., `https://api.mycarrierpackets.com/token`).
-        *   `SLACK_BOT_TOKEN`: Your Slack bot's token (starts with `xoxb-`).
-        *   `SLACK_SIGNING_SECRET`: Your Slack app's signing secret.
-        *   `SLACK_WEBHOOK_URL`: Your Slack incoming webhook URL (optional, if used for specific notifications).
-        *   `PORT`: The port number for the application (default: `3001`). You usually don't need to change this unless there's a port conflict on your server.
+    *   Edit `.env` and fill in your credentials (see "Environment Variables Summary" below). Key variables include:
+        *   `BEARER_TOKEN`, `REFRESH_TOKEN`, `TOKEN_ENDPOINT_URL`
+        *   `SLACK_SIGNING_SECRET`
+        *   `SLACK_WEBHOOK_URL` (optional, for specific notifications if used by the app logic beyond command responses)
+        *   `PORT` (default: `3000`)
 
 3.  **Start the application:**
-    *   **Production mode:**
-        ```bash
-        docker compose up -d
-        ```
-    *   **Development mode (with hot-reloading and debugging):**
-        If you have a `docker-compose.debug.yml` (or similar for development):
-        ```bash
-        docker compose -f docker-compose.debug.yml up
-        ```
-        (Adjust the command if your development compose file has a different name.)
+    ```bash
+    docker compose up -d
+    ```
+    The service name in `docker-compose.yml` is `mcp-slackbot-py`.
 
 4.  **Verify the application is running:**
     ```bash
@@ -52,130 +44,97 @@ A Slack bot for executing Carrier Risk Assessments using the MyCarrierPortal API
     docker compose ps
 
     # View logs
-    docker compose logs -f mcpslackbot
+    docker compose logs -f mcp-slackbot-py
     ```
-    (Assuming your service is named `mcpslackbot` in `docker-compose.yml`)
+    You can also check the health endpoint: `curl http://localhost:YOUR_PORT/health` (e.g., `curl http://localhost:3000/health`).
 
 ## Alternative Deployment Methods (Without Docker)
 
-If you prefer not to use Docker, you can run the application directly using Node.js.
+If you prefer not to use Docker, you can run the application directly using Python and `uv`.
 
 ### Prerequisites for Direct Deployment
-- Node.js >= 18.0.0
-- npm (Node Package Manager)
+- Python >= 3.10
+- `uv` (install via `pip install uv` or from https://github.com/astral-sh/uv)
 
 ### Setup and Running
 
-1.  **Install dependencies:**
+1.  **Create and activate a virtual environment (optional but recommended):**
     ```bash
-    npm install
+    # Using uv to create a venv in .venv directory
+    uv venv
+    source .venv/bin/activate  # On Linux/macOS
+    # .\.venv\Scripts\activate   # On Windows
     ```
 
-2.  **Configure environment variables:**
-    Create a `.env` file in the root of the project (as described in step 2 of the Docker setup) with all the necessary tokens and URLs.
+2.  **Install dependencies:**
+    ```bash
+    uv pip install -r requirements.txt
+    ```
 
-3.  **Run the application:**
-    *   **Development mode (e.g., using `nodemon` if configured in `package.json`):**
-        ```bash
-        npm run dev
-        ```
-        (Check your `package.json` for the exact development script command.)
-    *   **Production mode (e.g., using `pm2` or just `node`):**
-        ```bash
-        npm start
-        ```
-        or, if using PM2 (ensure it's installed: `npm install -g pm2`):
-        ```bash
-        npm run pm2:start  # Or pm2 start app.js --name mcp-slackbot
-        npm run pm2:logs   # Or pm2 logs mcp-slackbot
-        npm run pm2:stop   # Or pm2 stop mcp-slackbot
-        ```
-        (Check your `package.json` for `pm2` scripts.)
+3.  **Configure environment variables:**
+    Create a `.env` file in the project root (as described in step 2 of the Docker setup) with all the necessary tokens and URLs.
 
+4.  **Run the application using Uvicorn:**
+    ```bash
+    # Ensure PORT env var is set or use default 3000
+    # Example: export PORT=3000
+    uvicorn src.app:asgi_app --host 0.0.0.0 --port ${PORT:-3000} --reload
+    ```
+    The `--reload` flag is for development and automatically reloads the server on code changes. Remove it for production.
 
 ## Slack App Configuration
 
-To use this bot, you need to create a Slack App:
+To use this bot, you need to create or update your Slack App:
 
-1.  Go to [https://api.slack.com/apps](https://api.slack.com/apps) and click "Create New App".
-2.  Choose "From scratch".
-3.  Name your app (e.g., "MCP Bot") and select your workspace.
-4.  **Slash Commands:**
+1.  Go to [https://api.slack.com/apps](https://api.slack.com/apps) and select your app or "Create New App".
+2.  **Slash Commands:**
     *   Navigate to "Features" -> "Slash Commands".
-    *   Click "Create New Command".
-    *   **Command:** `/mcp` (or your preferred command)
-    *   **Request URL:** `https://your-public-url.com/slack/commands` (This needs to be the publicly accessible URL where your bot is running. For local development, you'll need a tunneling service like ngrok: `ngrok http 3001`).
+    *   Click "Create New Command" or edit your existing one.
+    *   **Command:** `/mcp-preview` (or your preferred command, matching the one in `src/app.py`)
+    *   **Request URL:** `https://your-public-url.com/slack/events` (This needs to be the publicly accessible URL where your bot is running. For local development, you'll need a tunneling service like ngrok: `ngrok http ${PORT:-3000}`).
     *   **Short Description:** e.g., "Fetch MCP Carrier Risk Assessment"
     *   Save the command.
-5.  **Event Subscriptions (Optional but Recommended for more interactive features):**
+3.  **Event Subscriptions (If using other Slack events beyond slash commands):**
     *   Navigate to "Features" -> "Event Subscriptions".
-    *   Toggle "Enable Events" to ON.
-    *   **Request URL:** `https://your-public-url.com/slack/events` (If using Event Subscriptions, update this to your events endpoint. It's often the same as Slash Commands but can be different). The URL will be verified.
-    *   You might subscribe to specific bot events if needed by your bot's functionality.
-6.  **Permissions (OAuth & Permissions):**
+    *   Toggle "Enable Events" to ON if you plan to use them.
+    *   **Request URL:** `https://your-public-url.com/slack/events`. The URL will be verified.
+4.  **Permissions (OAuth & Permissions):**
     *   Navigate to "Features" -> "OAuth & Permissions".
-    *   **Bot Token Scopes:** Add necessary scopes. At a minimum, you'll likely need:
+    *   **Bot Token Scopes:** Add necessary scopes. For the current functionality, you primarily need:
         *   `commands` (for slash commands)
-        *   `chat:write` (to send messages)
-        *   Possibly others depending on functionality (e.g., `users:read` if you need user info).
-    *   Install the app to your workspace. This will generate the **Bot User OAuth Token** (`SLACK_BOT_TOKEN` starting with `xoxb-`). 
-7.  **App Credentials:**
+        *   `chat:write` (used by Bolt's `respond()` and `say()` to send messages)
+    *   Install or reinstall the app to your workspace. This generates/updates the **Bot User OAuth Token**. While the current app initialization (`AsyncApp(token=None, ...)`) doesn't directly use a bot token for handling slash commands via HTTP, some `client` operations or future event handling might require it. If you need to use `client.chat_postMessage` with a bot token, you'd set `SLACK_BOT_TOKEN` in your `.env` and initialize `AsyncApp(token=os.environ.get("SLACK_BOT_TOKEN"), ...)`.
+
+5.  **App Credentials:**
     *   Navigate to "Settings" -> "Basic Information".
     *   Find your **Signing Secret** under "App Credentials" (`SLACK_SIGNING_SECRET`).
 
 ## Environment Variables Summary
 
--   **`BEARER_TOKEN`**
-    -   **Description:** MyCarrierPortal API bearer token.
-    -   **Example:** `your_long_bearer_token_here`
-    -   **Required:** Yes
-
--   **`REFRESH_TOKEN`**
-    -   **Description:** MyCarrierPortal API refresh token.
-    -   **Example:** `your_refresh_token_here`
-    -   **Required:** Yes
-
--   **`TOKEN_ENDPOINT_URL`**
-    -   **Description:** MyCarrierPortal API token refresh endpoint.
-    -   **Example:** `https://api.mycarrierpackets.com/token`
-    -   **Required:** Yes
-
--   **`SLACK_BOT_TOKEN`**
-    -   **Description:** Slack Bot User OAuth Token.
-    -   **Example:** `xoxb-your-slack-bot-token`
-    -   **Required:** Yes
-
--   **`SLACK_SIGNING_SECRET`**
-    -   **Description:** Slack App Signing Secret.
-    -   **Example:** `your_slack_signing_secret`
-    -   **Required:** Yes
-
--   **`SLACK_WEBHOOK_URL`**
-    -   **Description:** Slack Incoming Webhook URL (optional).
-    -   **Example:** `https://hooks.slack.com/services/...`
-    -   **Required:** No
-
--   **`PORT`**
-    -   **Description:** Port the application listens on.
-    -   **Example:** `3001`
-    -   **Required:** No
+-   **`BEARER_TOKEN`**: MyCarrierPortal API bearer token. (Required)
+-   **`REFRESH_TOKEN`**: MyCarrierPortal API refresh token. (Required)
+-   **`TOKEN_ENDPOINT_URL`**: MyCarrierPortal API token refresh endpoint. (Required)
+-   **`SLACK_SIGNING_SECRET`**: Slack App Signing Secret. (Required)
+-   **`SLACK_WEBHOOK_URL`**: Slack Incoming Webhook URL. (Optional, current version primarily uses `respond()` for slash commands, but this might be used for other notifications if implemented).
+-   **`PORT`**: Port the application listens on (default: `3000`). (Optional)
+-   **`SLACK_BOT_TOKEN`**: Slack Bot User OAuth Token (e.g., `xoxb-...`). (Optional for current slash command setup, but may be required for other Slack API interactions or event types).
 
 ## Testing
 
-The `package.json` might contain test scripts. For example, to test your MyCarrierPortal API token:
+Unit tests are located in the `tests/` directory and can be run using Python's `unittest` module:
 
 ```bash
-# Using Docker (if a test script is configured in your Docker setup)
-# docker compose run --rm mcpslackbot npm run test:token
-
-# Without Docker
-npm run test:token
+python -m unittest discover tests
 ```
-(This assumes a `test:token` script exists in `package.json`. Adapt as necessary.)
+Or, if you have specific test files:
+```bash
+python -m unittest tests.test_helpers
+python -m unittest tests.test_token_refresh
+```
 
 ## Security Notes
 
--   **Never commit your `.env` file (or any file with real credentials) to version control.** The `.gitignore` file should already list `.env`.
+-   **Never commit your `.env` file (or any file with real credentials) to version control.** The `.dockerignore` file should prevent `.env` from being included in Docker builds, and `.gitignore` should prevent it from being committed.
 -   Keep your API tokens and secrets secure.
 -   Consider using a secrets management solution for production environments.
 -   Regularly rotate your credentials if possible.
