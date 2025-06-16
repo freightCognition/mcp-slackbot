@@ -11,7 +11,7 @@
     "pm2:restart": "pm2 restart mcp-slackbot",
     "pm2:logs": "pm2 logs mcp-slackbot",
     "pm2:status": "pm2 status",
-    "test:token": "node test_token.js",
+    "test:token": "node tests/test_token.js",
     "lint": "eslint .",
     "lint:fix": "eslint --fix ."
   },
@@ -31,8 +31,8 @@
     "globals": "^16.2.0",
     "nodemon": "^3.0.3"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": ["slack", "slackbot", "mycarrierportal", "fakebizprez", "linehaul.ai"],
+  "author": "freightCognition",
   "engines": {
     "node": ">=18.0.0"
   }
