@@ -4,8 +4,14 @@ name: Deploy to Production
 on:
   push:
     branches: [ main ]
-  # Allow manual triggering from GitHub UI
+  # Allow manual triggering from GitHub UI with branch selection
   workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to deploy'
+        required: false
+        default: 'main'
+        type: string
 
 jobs:
   deploy:
@@ -14,11 +20,30 @@ jobs:
     runs-on: self-hosted
     
     steps:
-    # Step 1: Checkout the latest code
+    # Step 1: Determine which branch to deploy
+    - name: Set deployment branch
+      id: set_branch
+      run: |
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          INPUT_BRANCH="${{ github.event.inputs.branch }}"
+          if [ -z "$INPUT_BRANCH" ]; then
+            BRANCH="main"
+          else
+            BRANCH="$INPUT_BRANCH"
+          fi
+        else
+          BRANCH="${{ github.ref_name }}"
+        fi
+        echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+        echo "Deploying branch: $BRANCH"
+        
+    # Step 2: Checkout the specified branch
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ steps.set_branch.outputs.branch }}
       
-    # Step 2: Stop the existing container (if running)
+    # Step 3: Stop the existing container (if running)
     - name: Stop existing container
       run: |
         if docker ps -q -f name=mcpslackbot; then
@@ -30,7 +55,7 @@ jobs:
         fi
       continue-on-error: true
       
-    # Step 3: Remove old Docker image (optional, saves space)
+    # Step 4: Remove old Docker image (optional, saves space)
     - name: Remove old Docker image
       run: |
         if docker images -q mcpslackbot; then
@@ -39,13 +64,13 @@ jobs:
         fi
       continue-on-error: true
       
-    # Step 4: Build new Docker image
+    # Step 5: Build new Docker image
     - name: Build Docker image
       run: |
         echo "Building new Docker image..."
         docker build -t mcpslackbot .
         
-    # Step 5: Create .env file with secrets
+    # Step 6: Create .env file with secrets
     - name: Create environment file
       run: |
         echo "Creating .env file..."
@@ -55,11 +80,13 @@ jobs:
         BEARER_TOKEN=${{ secrets.BEARER_TOKEN }}
         REFRESH_TOKEN=${{ secrets.REFRESH_TOKEN }}
         TOKEN_ENDPOINT_URL=${{ secrets.TOKEN_ENDPOINT_URL }}
+        CLIENT_ID=${{ secrets.CLIENT_ID }}
+        CLIENT_SECRET=${{ secrets.CLIENT_SECRET }}
         SLACK_SIGNING_SECRET=${{ secrets.SLACK_SIGNING_SECRET }}
         SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}
         EOF
         
-    # Step 6: Start new container
+    # Step 7: Start new container
     - name: Start new container
       run: |
         echo "Starting new container..."
@@ -70,7 +97,7 @@ jobs:
           --env-file .env \
           mcpslackbot
           
-    # Step 7: Wait a moment and check if container is running
+    # Step 8: Wait a moment and check if container is running
     - name: Verify deployment
       run: |
         echo "Waiting for container to start..."
@@ -95,15 +122,29 @@ jobs:
           exit 1
         fi
         
-    # Step 8: Clean up .env file for security
+    # Step 9: Test refresh token functionality
+    - name: Test refresh token
+      run: |
+        echo "Testing refresh token functionality..."
+        if docker exec mcpslackbot node tests/test_refresh.js; then
+          echo "✅ Refresh token test passed!"
+        else
+          echo "❌ Refresh token test failed!"
+          echo "Container logs:"
+          docker logs mcpslackbot --tail 50
+          exit 1
+        fi
+        
+    # Step 10: Clean up .env file for security
     - name: Clean up
       run: |
         rm -f .env
         echo "Cleaned up temporary files"
       if: always()
       
-    # Step 9: Send notification (optional)
+    # Step 11: Send notification (optional)
     - name: Deployment notification
       run: |
         echo "🚀 Deployment completed successfully!"
+        echo "Branch deployed: ${{ steps.set_branch.outputs.branch }}"
         echo "Application is now running on $(hostname) at port 3001"
