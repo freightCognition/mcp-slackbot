@@ -131,6 +131,52 @@ const verifySlackRequest = (req, res, next) => {
   next();
 };
 
+// Middleware to verify test endpoint requests
+const verifyTestEndpointAuth = (req, res, next) => {
+  // Require an API key for test endpoints
+  const authHeader = req.headers['authorization'];
+  const apiKey = req.headers['x-api-key'];
+
+  // Check for either Bearer token or X-API-Key header
+  if (!authHeader && !apiKey) {
+    console.error('Missing authentication for test endpoint');
+    return res.status(401).json({
+      status: 'error',
+      message: 'Unauthorized: Missing authentication'
+    });
+  }
+
+  // Verify against a test API key from environment
+  const validApiKey = process.env.TEST_API_KEY;
+
+  if (!validApiKey) {
+    console.error('TEST_API_KEY not configured');
+    return res.status(503).json({
+      status: 'error',
+      message: 'Service unavailable: Authentication not configured'
+    });
+  }
+
+  // Check X-API-Key header
+  if (apiKey && timingSafeCompare(apiKey, validApiKey)) {
+    return next();
+  }
+
+  // Check Authorization: Bearer header
+  if (authHeader) {
+    const token = authHeader.replace('Bearer ', '');
+    if (timingSafeCompare(token, validApiKey)) {
+      return next();
+    }
+  }
+
+  console.error('Invalid authentication credentials for test endpoint');
+  return res.status(401).json({
+    status: 'error',
+    message: 'Unauthorized: Invalid credentials'
+  });
+};
+
 // Helper function to update .env file
 const envFilePath = path.resolve(__dirname, '.env');
 function updateEnvFile(updatedValues) {
@@ -180,22 +226,25 @@ async function refreshAccessToken() {
     process.env.BEARER_TOKEN = newAccessToken;
     updateEnvFile({ BEARER_TOKEN: newAccessToken });
 
+    let newRefreshIssued = false;
     if (newRefreshToken) {
       console.log('New refresh token received.');
       REFRESH_TOKEN = newRefreshToken;
       process.env.REFRESH_TOKEN = newRefreshToken;
       updateEnvFile({ REFRESH_TOKEN: newRefreshToken });
+      newRefreshIssued = true;
     } else {
       console.warn('New refresh token was not provided in the response. Old refresh token will be reused.');
+      newRefreshIssued = false;
     }
 
-    return true;
+    return { success: true, newRefreshIssued };
   } catch (error) {
     console.error('Error refreshing access token:', error.response ? JSON.stringify(error.response.data, null, 2) : error.message);
     if (error.response && error.response.status === 400) {
       console.error('Refresh token might be invalid or expired. Manual intervention may be required.');
     }
-    return false;
+    return { success: false, newRefreshIssued: false };
   }
 }
 
@@ -378,7 +427,7 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
       if (error.response && error.response.status === 401 && attempt < maxAttempts - 1) {
         console.log('Access token expired or invalid. Attempting refresh...');
         const refreshed = await refreshAccessToken();
-        if (refreshed) {
+        if (refreshed.success) {
           console.log('Token refreshed. Retrying API call...');
           attempt++;
         } else {
@@ -403,33 +452,35 @@ app.get('/health', (req, res) => {
 });
 
 // Test endpoint for refresh token verification (for testing/debugging)
-app.get('/test/refresh', async (req, res) => {
+app.get('/test/refresh', verifyTestEndpointAuth, async (req, res) => {
   // Only allow in non-production environments
   if (process.env.NODE_ENV === 'production') {
     return res.status(404).json({ status: 'error', message: 'Not found' });
   }
-  
+
   try {
     console.log('Refresh token test endpoint called');
     const result = await refreshAccessToken();
-    if (result) {
-      res.json({ 
-        status: 'success', 
+    if (result.success) {
+      res.json({
+        status: 'success',
         message: 'Token refreshed successfully',
-        newTokenPrefix: BEARER_TOKEN.substring(0, 20) + '...',
-        hasNewRefreshToken: !!REFRESH_TOKEN
+        timestamp: new Date().toISOString(),
+        hasNewRefreshToken: result.newRefreshIssued
       });
     } else {
-      res.status(500).json({ 
-        status: 'error', 
-        message: 'Failed to refresh token. Check server logs for details.' 
+      res.status(500).json({
+        status: 'error',
+        message: 'Failed to refresh token. Check server logs for details.',
+        timestamp: new Date().toISOString()
       });
     }
   } catch (error) {
     console.error('Error in refresh test endpoint:', error);
-    res.status(500).json({ 
-      status: 'error', 
-      message: error.message 
+    res.status(500).json({
+      status: 'error',
+      message: error.message,
+      timestamp: new Date().toISOString()
     });
   }
 });
