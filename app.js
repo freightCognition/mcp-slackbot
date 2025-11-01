@@ -15,6 +15,8 @@ const port = process.env.PORT || 3001;
 let BEARER_TOKEN = process.env.BEARER_TOKEN;
 let REFRESH_TOKEN = process.env.REFRESH_TOKEN;
 const TOKEN_ENDPOINT_URL = process.env.TOKEN_ENDPOINT_URL;
+const CLIENT_ID = process.env.CLIENT_ID;
+const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET;
 const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
 
@@ -29,6 +31,14 @@ if (!REFRESH_TOKEN) {
 }
 if (!TOKEN_ENDPOINT_URL) {
   console.error('TOKEN_ENDPOINT_URL environment variable is required');
+  process.exit(1);
+}
+if (!CLIENT_ID) {
+  console.error('CLIENT_ID environment variable is required');
+  process.exit(1);
+}
+if (!CLIENT_SECRET) {
+  console.error('CLIENT_SECRET environment variable is required');
   process.exit(1);
 }
 
@@ -147,7 +157,10 @@ async function refreshAccessToken() {
   try {
     const data = qs.stringify({
       grant_type: 'refresh_token',
-      refresh_token: REFRESH_TOKEN
+      refresh_token: REFRESH_TOKEN,
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+      username: 'Linehaultrucking'
     });
 
     const response = await axios.post(TOKEN_ENDPOINT_URL, data, {
