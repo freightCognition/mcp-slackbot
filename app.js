@@ -159,8 +159,7 @@ async function refreshAccessToken() {
       grant_type: 'refresh_token',
       refresh_token: REFRESH_TOKEN,
       client_id: CLIENT_ID,
-      client_secret: CLIENT_SECRET,
-      username: 'Linehaultrucking'
+      client_secret: CLIENT_SECRET
     });
 
     const response = await axios.post(TOKEN_ENDPOINT_URL, data, {
@@ -401,6 +400,33 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
 // Add basic health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'healthy' });
+});
+
+// Test endpoint for refresh token verification (for testing/debugging)
+app.get('/test/refresh', async (req, res) => {
+  try {
+    console.log('Refresh token test endpoint called');
+    const result = await refreshAccessToken();
+    if (result) {
+      res.json({ 
+        status: 'success', 
+        message: 'Token refreshed successfully',
+        newTokenPrefix: BEARER_TOKEN.substring(0, 20) + '...',
+        hasNewRefreshToken: !!REFRESH_TOKEN
+      });
+    } else {
+      res.status(500).json({ 
+        status: 'error', 
+        message: 'Failed to refresh token. Check server logs for details.' 
+      });
+    }
+  } catch (error) {
+    console.error('Error in refresh test endpoint:', error);
+    res.status(500).json({ 
+      status: 'error', 
+      message: error.message 
+    });
+  }
 });
 
 app.listen(port, () => {
