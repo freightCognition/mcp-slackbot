@@ -122,14 +122,27 @@ jobs:
           exit 1
         fi
         
-    # Step 9: Clean up .env file for security
+    # Step 9: Test refresh token functionality
+    - name: Test refresh token
+      run: |
+        echo "Testing refresh token functionality..."
+        if docker exec mcpslackbot node tests/test_refresh.js; then
+          echo "✅ Refresh token test passed!"
+        else
+          echo "❌ Refresh token test failed!"
+          echo "Container logs:"
+          docker logs mcpslackbot --tail 50
+          exit 1
+        fi
+        
+    # Step 10: Clean up .env file for security
     - name: Clean up
       run: |
         rm -f .env
         echo "Cleaned up temporary files"
       if: always()
       
-    # Step 10: Send notification (optional)
+    # Step 11: Send notification (optional)
     - name: Deployment notification
       run: |
         echo "🚀 Deployment completed successfully!"
