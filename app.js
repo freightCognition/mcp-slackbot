@@ -226,22 +226,25 @@ async function refreshAccessToken() {
     process.env.BEARER_TOKEN = newAccessToken;
     updateEnvFile({ BEARER_TOKEN: newAccessToken });
 
+    let newRefreshIssued = false;
     if (newRefreshToken) {
       console.log('New refresh token received.');
       REFRESH_TOKEN = newRefreshToken;
       process.env.REFRESH_TOKEN = newRefreshToken;
       updateEnvFile({ REFRESH_TOKEN: newRefreshToken });
+      newRefreshIssued = true;
     } else {
       console.warn('New refresh token was not provided in the response. Old refresh token will be reused.');
+      newRefreshIssued = false;
     }
 
-    return true;
+    return { success: true, newRefreshIssued };
   } catch (error) {
     console.error('Error refreshing access token:', error.response ? JSON.stringify(error.response.data, null, 2) : error.message);
     if (error.response && error.response.status === 400) {
       console.error('Refresh token might be invalid or expired. Manual intervention may be required.');
     }
-    return false;
+    return { success: false, newRefreshIssued: false };
   }
 }
 
@@ -424,7 +427,7 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
       if (error.response && error.response.status === 401 && attempt < maxAttempts - 1) {
         console.log('Access token expired or invalid. Attempting refresh...');
         const refreshed = await refreshAccessToken();
-        if (refreshed) {
+        if (refreshed.success) {
           console.log('Token refreshed. Retrying API call...');
           attempt++;
         } else {
@@ -458,12 +461,12 @@ app.get('/test/refresh', verifyTestEndpointAuth, async (req, res) => {
   try {
     console.log('Refresh token test endpoint called');
     const result = await refreshAccessToken();
-    if (result) {
+    if (result.success) {
       res.json({
         status: 'success',
         message: 'Token refreshed successfully',
         timestamp: new Date().toISOString(),
-        hasNewRefreshToken: !!REFRESH_TOKEN
+        hasNewRefreshToken: result.newRefreshIssued
       });
     } else {
       res.status(500).json({
