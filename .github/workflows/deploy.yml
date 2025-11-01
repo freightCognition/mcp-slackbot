@@ -55,6 +55,8 @@ jobs:
         BEARER_TOKEN=${{ secrets.BEARER_TOKEN }}
         REFRESH_TOKEN=${{ secrets.REFRESH_TOKEN }}
         TOKEN_ENDPOINT_URL=${{ secrets.TOKEN_ENDPOINT_URL }}
+        CLIENT_ID=${{ secrets.CLIENT_ID }}
+        CLIENT_SECRET=${{ secrets.CLIENT_SECRET }}
         SLACK_SIGNING_SECRET=${{ secrets.SLACK_SIGNING_SECRET }}
         SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}
         EOF
