@@ -7,15 +7,15 @@ services:
       context: .
       dockerfile: ./Dockerfile
     environment:
-      NODE_ENV: production
+      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
       BEARER_TOKEN: ${BEARER_TOKEN}
       REFRESH_TOKEN: ${REFRESH_TOKEN}
       TOKEN_ENDPOINT_URL: ${TOKEN_ENDPOINT_URL}
       CLIENT_ID: ${CLIENT_ID}
       CLIENT_SECRET: ${CLIENT_SECRET}
-      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
-      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET}
-      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+      MCP_API_URL: ${MCP_API_URL}
+      SLACK_DEBUG: ${SLACK_DEBUG}
     ports:
-      - 3001:3001
+      - "3001:3001"
     restart: unless-stopped

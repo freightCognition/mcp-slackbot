@@ -1,25 +1,20 @@
-FROM node:18-alpine
+FROM golang:1.21-alpine AS builder
 
-# Set working directory
-WORKDIR /usr/src/app
+WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+COPY go.mod go.sum ./
+RUN go mod download
 
-# Install dependencies
-RUN npm install --omit=dev
-
-# Copy app source
 COPY . .
 
-# Set proper permissions
-RUN chown -R node:node /usr/src/app
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o mcp-slackbot
 
-# Use non-root user
-USER node
+FROM alpine:3.19
 
-# Expose port
+WORKDIR /app
+
+COPY --from=builder /app/mcp-slackbot ./mcp-slackbot
+
 EXPOSE 3001
 
-# Start the application
-CMD ["npm", "start"]
+CMD ["./mcp-slackbot"]
