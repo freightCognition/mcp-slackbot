@@ -404,6 +404,11 @@ app.get('/health', (req, res) => {
 
 // Test endpoint for refresh token verification (for testing/debugging)
 app.get('/test/refresh', async (req, res) => {
+  // Only allow in non-production environments
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ status: 'error', message: 'Not found' });
+  }
+  
   try {
     console.log('Refresh token test endpoint called');
     const result = await refreshAccessToken();
