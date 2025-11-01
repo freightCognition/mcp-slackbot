@@ -131,6 +131,52 @@ const verifySlackRequest = (req, res, next) => {
   next();
 };
 
+// Middleware to verify test endpoint requests
+const verifyTestEndpointAuth = (req, res, next) => {
+  // Require an API key for test endpoints
+  const authHeader = req.headers['authorization'];
+  const apiKey = req.headers['x-api-key'];
+
+  // Check for either Bearer token or X-API-Key header
+  if (!authHeader && !apiKey) {
+    console.error('Missing authentication for test endpoint');
+    return res.status(401).json({
+      status: 'error',
+      message: 'Unauthorized: Missing authentication'
+    });
+  }
+
+  // Verify against a test API key from environment
+  const validApiKey = process.env.TEST_API_KEY;
+
+  if (!validApiKey) {
+    console.error('TEST_API_KEY not configured');
+    return res.status(503).json({
+      status: 'error',
+      message: 'Service unavailable: Authentication not configured'
+    });
+  }
+
+  // Check X-API-Key header
+  if (apiKey && timingSafeCompare(apiKey, validApiKey)) {
+    return next();
+  }
+
+  // Check Authorization: Bearer header
+  if (authHeader) {
+    const token = authHeader.replace('Bearer ', '');
+    if (timingSafeCompare(token, validApiKey)) {
+      return next();
+    }
+  }
+
+  console.error('Invalid authentication credentials for test endpoint');
+  return res.status(401).json({
+    status: 'error',
+    message: 'Unauthorized: Invalid credentials'
+  });
+};
+
 // Helper function to update .env file
 const envFilePath = path.resolve(__dirname, '.env');
 function updateEnvFile(updatedValues) {
@@ -403,33 +449,35 @@ app.get('/health', (req, res) => {
 });
 
 // Test endpoint for refresh token verification (for testing/debugging)
-app.get('/test/refresh', async (req, res) => {
+app.get('/test/refresh', verifyTestEndpointAuth, async (req, res) => {
   // Only allow in non-production environments
   if (process.env.NODE_ENV === 'production') {
     return res.status(404).json({ status: 'error', message: 'Not found' });
   }
-  
+
   try {
     console.log('Refresh token test endpoint called');
     const result = await refreshAccessToken();
     if (result) {
-      res.json({ 
-        status: 'success', 
+      res.json({
+        status: 'success',
         message: 'Token refreshed successfully',
-        newTokenPrefix: BEARER_TOKEN.substring(0, 20) + '...',
+        timestamp: new Date().toISOString(),
         hasNewRefreshToken: !!REFRESH_TOKEN
       });
     } else {
-      res.status(500).json({ 
-        status: 'error', 
-        message: 'Failed to refresh token. Check server logs for details.' 
+      res.status(500).json({
+        status: 'error',
+        message: 'Failed to refresh token. Check server logs for details.',
+        timestamp: new Date().toISOString()
       });
     }
   } catch (error) {
     console.error('Error in refresh test endpoint:', error);
-    res.status(500).json({ 
-      status: 'error', 
-      message: error.message 
+    res.status(500).json({
+      status: 'error',
+      message: error.message,
+      timestamp: new Date().toISOString()
     });
   }
 });
