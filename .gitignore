@@ -67,3 +67,8 @@ coverage/
 .Trashes
 ehthumbs.db
 tests/*
+
+
+.claude/
+CLAUDE.md
+*CLAUDE.md
