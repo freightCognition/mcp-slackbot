@@ -162,16 +162,162 @@ To use this bot, you need to create a Slack App:
 
 ## Testing
 
-The `package.json` might contain test scripts. For example, to test your MyCarrierPortal API token:
+The `package.json` contains several test scripts for verifying the application functionality.
+
+### Available Test Scripts
+
+- `npm test` - Runs all tests (preview, refresh token, and bearer token)
+- `npm run test:token` - Tests the bearer token against the API
+- `npm run test:refresh` - Tests the refresh token functionality
+
+### Testing Refresh Token Functionality
+
+The refresh token is critical for maintaining API access. Here are several ways to verify it's working correctly:
+
+#### 1. Local Testing (Node.js)
+
+Ensure your `.env` file has all required variables (`REFRESH_TOKEN`, `TOKEN_ENDPOINT_URL`, `CLIENT_ID`, `CLIENT_SECRET`).
 
 ```bash
-# Using Docker (if a test script is configured in your Docker setup)
-# docker compose run --rm mcpslackbot npm run test:token
+# Test just the refresh token
+npm run test:refresh
+
+# Or run the test directly
+node tests/test_refresh.js
+
+# Run all tests (includes refresh token test)
+npm test
+```
+
+**Expected output on success:**
+- "Attempting to refresh access token..."
+- "Access token refreshed successfully."
+- "New refresh token received." (if provided)
+- "Test successful!"
+
+#### 2. Local Testing with Docker
+
+```bash
+# Build the image
+docker build -t mcpslackbot .
+
+# Run the container
+docker run -d --name mcpslackbot-test \
+  --env-file .env \
+  -p 3001:3001 \
+  mcpslackbot
+
+# Wait a moment for it to start
+sleep 5
+
+# Test the refresh token
+docker exec mcpslackbot-test node tests/test_refresh.js
+
+# Clean up
+docker stop mcpslackbot-test
+docker rm mcpslackbot-test
+```
+
+#### 3. Testing via HTTP Endpoint
+
+If the application is running (locally or in production), you can test the refresh token via an HTTP endpoint:
+
+```bash
+# Test the refresh token endpoint
+curl http://localhost:3001/test/refresh
+
+# With better formatting (if you have jq installed)
+curl http://localhost:3001/test/refresh | jq
+
+# For production (replace with your server URL)
+curl https://your-production-server:3001/test/refresh
+```
+
+**Expected JSON response:**
+```json
+{
+  "status": "success",
+  "message": "Token refreshed successfully",
+  "newTokenPrefix": "TM8GfS8N7MusRc5Q_6Nm...",
+  "hasNewRefreshToken": true
+}
+```
+
+You can also open the endpoint directly in your browser:
+```
+http://localhost:3001/test/refresh
+```
+
+#### 4. Testing in Production
+
+**Via SSH into your production server:**
+
+```bash
+# SSH into your server
+ssh user@your-production-server
+
+# Test the refresh token directly
+docker exec mcpslackbot node tests/test_refresh.js
+
+# Test via HTTP endpoint
+curl http://localhost:3001/test/refresh
+
+# Monitor logs for refresh activity
+docker logs -f mcpslackbot | grep -i refresh
+```
+
+**Automatic verification during deployment:**
+
+The GitHub Actions deployment workflow automatically tests the refresh token after deployment. Check the "Test refresh token" step in your GitHub Actions logs to verify it passed.
+
+#### 5. Real-World Scenario Testing
+
+To verify automatic refresh when a token expires:
+
+1. Temporarily set an expired `BEARER_TOKEN` in your environment
+2. Restart the container/application
+3. Send a Slack command: `/mcp 12345`
+4. Check your server logs - you should see:
+   - "Access token expired or invalid. Attempting refresh..."
+   - "Attempting to refresh access token..."
+   - "Access token refreshed successfully."
+   - "Token refreshed. Retrying API call..."
+
+#### 6. Monitoring Refresh Token Activity
+
+**Watch logs continuously:**
+
+```bash
+# Monitor logs for any refresh token activity
+docker logs -f mcpslackbot | grep -i -E "(refresh|token|401)"
+
+# Or view all logs
+docker logs -f mcpslackbot
+```
+
+**What to look for:**
+
+✅ **Success indicators:**
+- "Access token refreshed successfully."
+- "New refresh token received." (if provided by API)
+- API calls succeed after token refresh
+
+❌ **Failure indicators:**
+- "Error refreshing access token: ..."
+- "Refresh token might be invalid or expired..."
+- API calls fail with 401 even after refresh attempt
+
+### Testing Bearer Token
+
+To test your bearer token against the API:
+
+```bash
+# Using Docker
+docker compose run --rm mcpslackbot npm run test:token
 
 # Without Docker
 npm run test:token
 ```
-(This assumes a `test:token` script exists in `package.json`. Adapt as necessary.)
 
 ## Security Notes
 
