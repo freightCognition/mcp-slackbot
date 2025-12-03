@@ -72,3 +72,14 @@ tests/*
 .claude/
 CLAUDE.md
 *CLAUDE.md
+
+.postman/
+.postman_environments
+postman_collection.json
+postman_environment.json
+postman_globals.json
+postman
+postman/
+*postman/
+postman/*.json
+postman/**/*.json
