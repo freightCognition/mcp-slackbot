@@ -13,6 +13,7 @@
     "pm2:status": "pm2 status",
     "test": "node tests/test_preview.js && node tests/test_refresh.js && node tests/test_token.js",
     "test:token": "node tests/test_token.js",
+    "test:refresh": "node tests/test_refresh.js",
     "lint": "eslint .",
     "lint:fix": "eslint --fix ."
   },
