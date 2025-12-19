@@ -59,7 +59,7 @@ app.use(express.json({
   }
 }));
 
-app.use(express.urlencoded({ 
+app.use(express.urlencoded({
   extended: true,
   verify: (req, res, buf) => {
     req.rawBody = buf;
@@ -118,7 +118,7 @@ const verifySlackRequest = (req, res, next) => {
   }
 
   const sigBasestring = `v0:${timestamp}:${req.rawBody}`;
-  const mySignature = 'v0=' + 
+  const mySignature = 'v0=' +
     crypto.createHmac('sha256', SLACK_SIGNING_SECRET)
       .update(sigBasestring, 'utf8')
       .digest('hex');
@@ -248,14 +248,7 @@ async function refreshAccessToken() {
   }
 }
 
-app.post('/slack/commands', verifySlackRequest, async (req, res) => {
-  const { text, response_url } = req.body;
-
-  if (!text) {
-    return res.send('Please provide a valid MC number.');
-  }
-
-  const mcNumber = text.trim();
+async function handleRiskAssessment(mcNumber, response_url) {
   let attempt = 0;
   const maxAttempts = 2;
 
@@ -277,7 +270,13 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
 
       if (!apiResponse.data || apiResponse.data.length === 0) {
         console.log(`No data found for MC number: ${mcNumber}`);
-        return res.send('No data found for the provided MC number.');
+        const message = 'No data found for the provided MC number.';
+
+        // Post failure to response_url
+        if (response_url) {
+           await axios.post(response_url, { text: message });
+        }
+        return;
       }
 
       const data = apiResponse.data[0];
@@ -347,9 +346,9 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
 
       // Add MyCarrierProtect section
       const mcpData = {
-        TotalPoints: (data.IsBlocked ? 1000 : 0) + (data.FreightValidateStatus === 'Review Recommended' ? 1000 : 0), 
+        TotalPoints: (data.IsBlocked ? 1000 : 0) + (data.FreightValidateStatus === 'Review Recommended' ? 1000 : 0),
         OverallRating: getRiskLevel((data.IsBlocked ? 1000 : 0) + (data.FreightValidateStatus === 'Review Recommended' ? 1000 : 0)),
-        Infractions: [] 
+        Infractions: []
       };
       if (data.IsBlocked) {
         mcpData.Infractions.push({
@@ -400,15 +399,14 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
       };
 
       console.log(`Sending Slack response for MC number: ${mcNumber}`);
-      
-      // Send immediate acknowledgment
-      res.send();
+
+      // We already sent immediate acknowledgment. Now sending the actual data.
 
       // Send detailed response via webhook
       try {
-        await axios.post(SLACK_WEBHOOK_URL, slackResponse, { 
+        await axios.post(SLACK_WEBHOOK_URL, slackResponse, {
           headers: { 'Content-Type': 'application/json' },
-          timeout: 5000 
+          timeout: 5000
         });
       } catch (webhookError) {
         console.error('Error sending webhook response:', webhookError);
@@ -432,7 +430,10 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
           attempt++;
         } else {
           console.error('Failed to refresh token. Aborting.');
-          return res.send("Error: Could not refresh authentication. Please check logs or contact admin.");
+          if (response_url) {
+              await axios.post(response_url, { text: "Error: Could not refresh authentication. Please check logs or contact admin." });
+          }
+          return;
         }
       } else {
         console.error('API call failed or max retries reached:', error.response ? JSON.stringify(error.response.data, null, 2) : error.message);
@@ -440,10 +441,31 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
         if (error.response && error.response.status === 401) {
             userMessage = 'Authentication failed even after attempting to refresh. Please contact an administrator.';
         }
-        return res.send(userMessage);
+        if (response_url) {
+            await axios.post(response_url, { text: userMessage });
+        }
+        return;
       }
     }
   } // end while loop
+}
+
+app.post('/slack/commands', verifySlackRequest, async (req, res) => {
+  const { text, response_url } = req.body;
+
+  if (!text) {
+    return res.send('Please provide a valid MC number.');
+  }
+
+  const mcNumber = text.trim();
+
+  // Immediate acknowledgment to avoid timeout
+  res.status(200).send();
+
+  // Process asynchronously
+  handleRiskAssessment(mcNumber, response_url).catch(err => {
+      console.error("Unhandled error in background processing:", err);
+  });
 });
 
 // Add basic health check endpoint
