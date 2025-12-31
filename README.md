@@ -13,320 +13,673 @@ A Slack bot for executing Carrier Risk Assessments using the MyCarrierPortal API
 - MyCarrierPortal API access (including Bearer Token, Refresh Token, and Token Endpoint URL)
 - Node.js >= 18.0.0 (if not using Docker)
 
+## Architecture
+
+This application uses a **dual-container architecture** with Docker Compose:
+
+- **mcpslackbot**: Node.js application serving Slack commands and API integration
+- **libsql**: Database server (Turso libSQL) for persistent token storage
+
+Token persistence ensures OAuth refresh tokens survive container restarts and enables automatic token rotation without manual intervention.
+
 ## Quick Start with Docker Compose
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/freightcognition/mcp-slackbot.git
-    cd mcp-slackbot
-    ```
-2.  **Configure environment variables:**
-    *   Copy `.env.example` to `.env`:
-        ```bash
-        cp .env.example .env
-        ```
-    *   Edit `.env` and fill in your credentials:
-        *   `BEARER_TOKEN`: Your MyCarrierPortal API bearer token.
-        *   `REFRESH_TOKEN`: Your MyCarrierPortal API refresh token.
-        *   `TOKEN_ENDPOINT_URL`: The URL for the MyCarrierPortal token endpoint (e.g., `https://api.mycarrierpackets.com/token`).
-        *   `SLACK_BOT_TOKEN`: Your Slack bot's token (starts with `xoxb-`).
-        *   `SLACK_SIGNING_SECRET`: Your Slack app's signing secret.
-        *   `SLACK_WEBHOOK_URL`: Your Slack incoming webhook URL (optional, if used for specific notifications).
-        *   `PORT`: The port number for the application (default: `3001`). You usually don't need to change this unless there's a port conflict on your server.
+### 1. Clone the repository
 
-3.  **Start the application:**
-    *   **Production mode:**
-        ```bash
-        docker compose up -d
-        ```
-    *   **Development mode (with hot-reloading and debugging):**
-        If you have a `docker-compose.debug.yml` (or similar for development):
-        ```bash
-        docker compose -f docker-compose.debug.yml up
-        ```
-        (Adjust the command if your development compose file has a different name.)
+```bash
+git clone https://github.com/freightcognition/mcp-slackbot.git
+cd mcp-slackbot
+```
 
-4.  **Verify the application is running:**
-    ```bash
-    # Check container status
-    docker compose ps
+### 2. Configure environment variables
 
-    # View logs
-    docker compose logs -f mcpslackbot
-    ```
-    (Assuming your service is named `mcpslackbot` in `docker-compose.yml`)
+Copy the example file:
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and fill in your credentials:
+
+```bash
+# MyCarrierPortal API Configuration
+BEARER_TOKEN=your_bearer_token_here
+REFRESH_TOKEN=your_refresh_token_here
+TOKEN_ENDPOINT_URL=https://api.mycarrierpackets.com/token
+CLIENT_ID=your_mcp_username
+CLIENT_SECRET=your_mcp_password
+
+# Slack Configuration
+SLACK_BOT_TOKEN=xoxb-your-slack-bot-token
+SLACK_SIGNING_SECRET=your_slack_signing_secret
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/your/webhook/url
+
+# Application Configuration
+NODE_ENV=production
+PORT=3001
+
+# Database Configuration (optional - defaults shown)
+LIBSQL_URL=http://libsql:8080
+```
+
+**Important Notes:**
+- `CLIENT_ID` and `CLIENT_SECRET` are your MyCarrierPortal **username and password** (used for initial token generation only)
+- These credentials are NOT sent with refresh token requests
+- Initial `BEARER_TOKEN` and `REFRESH_TOKEN` values are only used on first startup to seed the database
+
+### 3. Start the application
+
+**Production mode:**
+```bash
+docker-compose up -d
+```
+
+This command will:
+1. Pull the libSQL server image
+2. Build the Node.js application image
+3. Create a persistent volume for token storage
+4. Start both containers in the background
+
+**Development mode (with logs visible):**
+```bash
+docker-compose up
+```
+
+### 4. Verify deployment
+
+Check that both containers are running:
+```bash
+docker-compose ps
+```
+
+Expected output:
+```
+NAME                IMAGE                                    STATUS
+libsql              ghcr.io/tursodatabase/libsql-server:latest   Up
+mcpslackbot         mcpslackbot                              Up
+```
+
+View application logs:
+```bash
+# All logs
+docker-compose logs -f
+
+# Just the app
+docker-compose logs -f mcpslackbot
+
+# Just the database
+docker-compose logs -f libsql
+```
+
+Look for these startup messages:
+- `Database initialized`
+- `Loaded tokens from database` OR `No tokens in database, saving from environment`
+- `Server is running on port 3001`
+
+### 5. Test token refresh functionality
+
+```bash
+docker-compose exec mcpslackbot node tests/test_refresh.js
+```
+
+Expected output:
+```
+Starting token refresh test...
+Loaded tokens from database
+Current Bearer Token (first 20 chars): 2_HG7Zvg3wqYkqtXxKge...
+Current Refresh Token: a2afa1653b4b4b048398...
+Attempting to refresh access token...
+Response received: { ... }
+Access token refreshed successfully.
+New refresh token received.
+Tokens saved to database
+Test successful!
+```
+
+### 6. Health check
+
+```bash
+curl http://localhost:3001/health
+```
+
+Expected response:
+```json
+{"status":"healthy"}
+```
+
+## Token Persistence & Rotation
+
+### How It Works
+
+1. **First Startup**: Tokens from environment variables are saved to the libSQL database
+2. **Subsequent Startups**: Tokens are loaded from the database (not environment variables)
+3. **Token Refresh**: When access token expires (14 days), the app automatically:
+   - Detects 401 error from MyCarrierPortal API
+   - Calls refresh endpoint with current refresh token
+   - Receives new access token and refresh token
+   - Saves both to database
+   - Retries the failed API call
+4. **Container Restart**: Tokens persist in the libSQL volume and are automatically loaded
+
+### Database Management
+
+**View current tokens:**
+```bash
+docker-compose exec mcpslackbot node -e "
+  const { createClient } = require('@libsql/client');
+  const db = createClient({ url: 'http://libsql:8080' });
+  db.execute('SELECT bearer_token, refresh_token, updated_at FROM tokens').then(r => console.log(r.rows));
+"
+```
+
+**Manually update tokens in database:**
+```bash
+docker-compose exec mcpslackbot node -e "
+  const { saveTokens } = require('./db');
+  saveTokens('new_bearer_token', 'new_refresh_token').then(() => console.log('Done'));
+"
+```
+
+**Backup database:**
+```bash
+# Stop containers first
+docker-compose down
+
+# Copy the volume data
+docker run --rm -v mcp-slackbot_libsql-data:/data -v $(pwd):/backup alpine \
+  tar czf /backup/libsql-backup-$(date +%Y%m%d).tar.gz -C /data .
+
+# Restart containers
+docker-compose up -d
+```
+
+**Restore database:**
+```bash
+docker-compose down
+docker run --rm -v mcp-slackbot_libsql-data:/data -v $(pwd):/backup alpine \
+  tar xzf /backup/libsql-backup-YYYYMMDD.tar.gz -C /data
+docker-compose up -d
+```
+
+## Deployment with GitHub Actions
+
+This repository includes a self-hosted GitHub Actions workflow for automatic deployment.
+
+### Setup Self-Hosted Runner
+
+1. Install GitHub Actions runner on your server (Proxmox VM, etc.)
+2. Configure the runner for your repository
+3. Add required secrets to your GitHub repository
+
+### Required GitHub Secrets
+
+Navigate to **Settings > Secrets and variables > Actions** and add:
+
+| Secret Name | Description | Example |
+|-------------|-------------|---------|
+| `BEARER_TOKEN` | Initial MyCarrierPortal access token | `VyTeZfFdtMagZ03J...` |
+| `REFRESH_TOKEN` | Initial MyCarrierPortal refresh token | `a2afa1653b4b4b04...` |
+| `TOKEN_ENDPOINT_URL` | MyCarrierPortal token endpoint | `https://api.mycarrierpackets.com/token` |
+| `CLIENT_ID` | MyCarrierPortal username | `your_username` |
+| `CLIENT_SECRET` | MyCarrierPortal password | `your_password` |
+| `SLACK_SIGNING_SECRET` | Slack app signing secret | `1234567890abcdef...` |
+| `SLACK_WEBHOOK_URL` | Slack incoming webhook URL | `https://hooks.slack.com/...` |
+
+**Note:** After the first deployment, tokens will be managed automatically via the database. GitHub Secrets only provide initial values.
+
+### Deployment Workflow
+
+The workflow triggers on:
+- Push to `main` branch
+- Manual trigger via GitHub Actions UI (can deploy any branch)
+
+**Deployment steps:**
+1. Checkout code from specified branch
+2. Stop existing containers
+3. Create `.env` file from GitHub Secrets
+4. Start containers with `docker-compose up -d --build`
+5. Wait for containers to start (15 seconds)
+6. Verify health endpoint responds
+7. Test refresh token functionality
+8. Clean up `.env` file (for security)
+
+**View deployment logs:**
+- Go to **Actions** tab in GitHub
+- Click on the latest workflow run
+- Expand each step to see detailed logs
+
+**Manual deployment:**
+1. Go to **Actions** tab
+2. Select **Deploy to Production** workflow
+3. Click **Run workflow**
+4. Enter branch name (or leave as `main`)
+5. Click **Run workflow** button
+
+## Updating Tokens
+
+### Scenario 1: First-Time Setup
+
+If you're starting fresh or need to reset tokens:
+
+1. Obtain fresh tokens from MyCarrierPortal using password grant:
+   ```bash
+   curl -X POST https://api.mycarrierpackets.com/token \
+     -H "Content-Type: application/x-www-form-urlencoded" \
+     -d "grant_type=password&username=YOUR_USERNAME&password=YOUR_PASSWORD"
+   ```
+
+2. Update `.env` file with the response tokens:
+   ```bash
+   BEARER_TOKEN=<access_token from response>
+   REFRESH_TOKEN=<refresh_token from response>
+   ```
+
+3. Restart containers:
+   ```bash
+   docker-compose down
+   docker-compose up -d
+   ```
+
+### Scenario 2: Rotating Tokens in Production
+
+Tokens are automatically rotated! You don't need to manually update them.
+
+If you ever need to force a refresh:
+```bash
+docker-compose exec mcpslackbot node tests/test_refresh.js
+```
+
+### Scenario 3: Token Corruption or Loss
+
+If the database becomes corrupted:
+
+1. Get fresh tokens (see Scenario 1)
+2. Stop containers:
+   ```bash
+   docker-compose down
+   ```
+3. Remove the volume:
+   ```bash
+   docker volume rm mcp-slackbot_libsql-data
+   ```
+4. Update `.env` with fresh tokens
+5. Start containers:
+   ```bash
+   docker-compose up -d
+   ```
+
+The database will be recreated and seeded with the new tokens.
 
 ## Alternative Deployment Methods (Without Docker)
 
-If you prefer not to use Docker, you can run the application directly using Node.js.
+If you prefer not to use Docker, you can run the application directly with Node.js. **Note:** You'll need to run your own libSQL server or modify the code to use a different database.
 
 ### Prerequisites for Direct Deployment
 - Node.js >= 18.0.0
 - npm (Node Package Manager)
+- libSQL server running (or modify code for different database)
 
 ### Setup and Running
 
-1.  **Install dependencies:**
-    ```bash
-    npm install
-    ```
+1. **Install dependencies:**
+   ```bash
+   npm install
+   ```
 
-2.  **Configure environment variables:**
-    Create a `.env` file in the root of the project (as described in step 2 of the Docker setup) with all the necessary tokens and URLs.
+2. **Configure environment variables:**
+   Create a `.env` file with all required variables (see section 2 above)
 
-3.  **Run the application:**
-    *   **Development mode (e.g., using `nodemon` if configured in `package.json`):**
-        ```bash
-        npm run dev
-        ```
-        (Check your `package.json` for the exact development script command.)
-    *   **Production mode (e.g., using `pm2` or just `node`):**
-        ```bash
-        npm start
-        ```
-        or, if using PM2 (ensure it's installed: `npm install -g pm2`):
-        ```bash
-        npm run pm2:start  # Or pm2 start app.js --name mcp-slackbot
-        npm run pm2:logs   # Or pm2 logs mcp-slackbot
-        npm run pm2:stop   # Or pm2 stop mcp-slackbot
-        ```
-        (Check your `package.json` for `pm2` scripts.)
+3. **Run libSQL server separately:**
+   ```bash
+   # Download and run sqld
+   # See: https://github.com/tursodatabase/libsql
+   ```
 
+4. **Run the application:**
+   ```bash
+   # Development mode
+   npm run dev
+
+   # Production mode
+   npm start
+
+   # Or with PM2
+   npm run pm2:start
+   npm run pm2:logs
+   npm run pm2:stop
+   ```
 
 ## Slack App Configuration
 
 To use this bot, you need to create a Slack App:
 
-1.  Go to [https://api.slack.com/apps](https://api.slack.com/apps) and click "Create New App".
-2.  Choose "From scratch".
-3.  Name your app (e.g., "MCP Bot") and select your workspace.
-4.  **Slash Commands:**
-    *   Navigate to "Features" -> "Slash Commands".
-    *   Click "Create New Command".
-    *   **Command:** `/mcp` (or your preferred command)
-    *   **Request URL:** `https://your-public-url.com/slack/commands` (This needs to be the publicly accessible URL where your bot is running. For local development, you'll need a tunneling service like ngrok: `ngrok http 3001`).
-    *   **Short Description:** e.g., "Fetch MCP Carrier Risk Assessment"
-    *   Save the command.
-5.  **Event Subscriptions (Optional but Recommended for more interactive features):**
-    *   Navigate to "Features" -> "Event Subscriptions".
-    *   Toggle "Enable Events" to ON.
-    *   **Request URL:** `https://your-public-url.com/slack/events` (If using Event Subscriptions, update this to your events endpoint. It's often the same as Slash Commands but can be different). The URL will be verified.
-    *   You might subscribe to specific bot events if needed by your bot's functionality.
-6.  **Permissions (OAuth & Permissions):**
-    *   Navigate to "Features" -> "OAuth & Permissions".
-    *   **Bot Token Scopes:** Add necessary scopes. At a minimum, you'll likely need:
-        *   `commands` (for slash commands)
-        *   `chat:write` (to send messages)
-        *   Possibly others depending on functionality (e.g., `users:read` if you need user info).
-    *   Install the app to your workspace. This will generate the **Bot User OAuth Token** (`SLACK_BOT_TOKEN` starting with `xoxb-`). 
-7.  **App Credentials:**
-    *   Navigate to "Settings" -> "Basic Information".
-    *   Find your **Signing Secret** under "App Credentials" (`SLACK_SIGNING_SECRET`).
+1. Go to [https://api.slack.com/apps](https://api.slack.com/apps) and click "Create New App"
+2. Choose "From scratch"
+3. Name your app (e.g., "MCP Bot") and select your workspace
 
-## Environment Variables Summary
+### Slash Commands
 
--   **`BEARER_TOKEN`**
-    -   **Description:** MyCarrierPortal API bearer token.
-    -   **Example:** `your_long_bearer_token_here`
-    -   **Required:** Yes
+1. Navigate to **Features > Slash Commands**
+2. Click **Create New Command**
+3. Configure:
+   - **Command:** `/mcp`
+   - **Request URL:** `https://your-public-url.com/slack/commands`
+   - **Short Description:** "Fetch MCP Carrier Risk Assessment"
+   - **Usage Hint:** `[MC number]`
+4. Save
 
--   **`REFRESH_TOKEN`**
-    -   **Description:** MyCarrierPortal API refresh token.
-    -   **Example:** `your_refresh_token_here`
-    -   **Required:** Yes
+**For local development:** Use ngrok to create a public URL:
+```bash
+ngrok http 3001
+# Use the https URL provided by ngrok
+```
 
--   **`TOKEN_ENDPOINT_URL`**
-    -   **Description:** MyCarrierPortal API token refresh endpoint.
-    -   **Example:** `https://api.mycarrierpackets.com/token`
-    -   **Required:** Yes
+### Permissions (OAuth & Permissions)
 
--   **`SLACK_BOT_TOKEN`**
-    -   **Description:** Slack Bot User OAuth Token.
-    -   **Example:** `xoxb-your-slack-bot-token`
-    -   **Required:** Yes
+1. Navigate to **Features > OAuth & Permissions**
+2. Add **Bot Token Scopes**:
+   - `commands` - Required for slash commands
+   - `chat:write` - Required to send messages
+3. Click **Install to Workspace**
+4. Copy the **Bot User OAuth Token** (starts with `xoxb-`) to use as `SLACK_BOT_TOKEN`
 
--   **`SLACK_SIGNING_SECRET`**
-    -   **Description:** Slack App Signing Secret.
-    -   **Example:** `your_slack_signing_secret`
-    -   **Required:** Yes
+### App Credentials
 
--   **`SLACK_WEBHOOK_URL`**
-    -   **Description:** Slack Incoming Webhook URL (optional).
-    -   **Example:** `https://hooks.slack.com/services/...`
-    -   **Required:** No
+1. Navigate to **Settings > Basic Information**
+2. Find **Signing Secret** under "App Credentials"
+3. Copy to use as `SLACK_SIGNING_SECRET`
 
--   **`PORT`**
-    -   **Description:** Port the application listens on.
-    -   **Example:** `3001`
-    -   **Required:** No
+## Environment Variables Reference
+
+| Variable | Required | Description | Example |
+|----------|----------|-------------|---------|
+| `BEARER_TOKEN` | Yes | MyCarrierPortal access token | `VyTeZfFdtMagZ03J...` |
+| `REFRESH_TOKEN` | Yes | MyCarrierPortal refresh token | `a2afa1653b4b4b04...` |
+| `TOKEN_ENDPOINT_URL` | Yes | Token refresh endpoint | `https://api.mycarrierpackets.com/token` |
+| `CLIENT_ID` | Yes | MyCarrierPortal username | `your_username` |
+| `CLIENT_SECRET` | Yes | MyCarrierPortal password | `your_password` |
+| `SLACK_SIGNING_SECRET` | Yes | Slack app signing secret | `1234567890abcdef...` |
+| `SLACK_WEBHOOK_URL` | Yes | Slack incoming webhook URL | `https://hooks.slack.com/...` |
+| `SLACK_BOT_TOKEN` | No* | Slack bot token | `xoxb-...` |
+| `NODE_ENV` | No | Environment mode | `production` or `development` |
+| `PORT` | No | Application port | `3001` (default) |
+| `LIBSQL_URL` | No | Database connection URL | `http://libsql:8080` (default) |
+| `TEST_API_KEY` | No | API key for test endpoints | `secure_random_string` |
+
+*Currently configured but not actively used by the application
 
 ## Testing
 
-The `package.json` contains several test scripts for verifying the application functionality.
+The project includes comprehensive test scripts for verifying functionality.
 
 ### Available Test Scripts
 
-- `npm test` - Runs all tests (preview, refresh token, and bearer token)
-- `npm run test:token` - Tests the bearer token against the API
-- `npm run test:refresh` - Tests the refresh token functionality
-
-### Testing Refresh Token Functionality
-
-The refresh token is critical for maintaining API access. Here are several ways to verify it's working correctly:
-
-#### 1. Local Testing (Node.js)
-
-Ensure your `.env` file has all required variables (`REFRESH_TOKEN`, `TOKEN_ENDPOINT_URL`, `CLIENT_ID`, `CLIENT_SECRET`).
-
 ```bash
-# Test just the refresh token
-npm run test:refresh
-
-# Or run the test directly
-node tests/test_refresh.js
-
-# Run all tests (includes refresh token test)
+# Run all tests
 npm test
+
+# Test bearer token against API
+npm run test:token
+
+# Test refresh token functionality
+npm run test:refresh
 ```
 
-**Expected output on success:**
-- "Attempting to refresh access token..."
-- "Access token refreshed successfully."
-- "New refresh token received." (if provided)
-- "Test successful!"
+### Testing Refresh Token with Docker Compose
 
-#### 2. Local Testing with Docker
+**Quick test:**
+```bash
+docker-compose exec mcpslackbot node tests/test_refresh.js
+```
+
+**Expected success output:**
+```
+Starting token refresh test...
+Loaded tokens from database
+Current Bearer Token (first 20 chars): 2_HG7Zvg3wqYkqtXxKge...
+Current Refresh Token: a2afa1653b4b4b048398...
+Attempting to refresh access token...
+Response received: {
+  "access_token": "tTG1sIov5mITHION...",
+  "token_type": "bearer",
+  "expires_in": 1209599,
+  "refresh_token": "bc306b1405554e03...",
+  "userName": "...",
+  ".issued": "Wed, 31 Dec 2025 04:32:53 GMT",
+  ".expires": "Wed, 14 Jan 2026 04:32:53 GMT"
+}
+Access token refreshed successfully.
+New refresh token received.
+Tokens saved to database
+Test successful!
+New Bearer Token (first 20 chars): tTG1sIov5mITHIONeI1_...
+New Refresh Token: bc306b1405554e038b82...
+```
+
+### Testing After Container Restart
+
+Verify tokens persist across restarts:
 
 ```bash
-# Build the image
-docker build -t mcpslackbot .
+# Restart the app container (database stays running)
+docker-compose restart mcpslackbot
 
-# Run the container
-docker run -d --name mcpslackbot-test \
-  --env-file .env \
-  -p 3001:3001 \
-  mcpslackbot
-
-# Wait a moment for it to start
+# Wait for startup
 sleep 5
 
-# Test the refresh token
-docker exec mcpslackbot-test node tests/test_refresh.js
+# Check logs - should show "Loaded tokens from database"
+docker-compose logs mcpslackbot | grep -i token
 
-# Clean up
-docker stop mcpslackbot-test
-docker rm mcpslackbot-test
+# Verify tokens still work
+docker-compose exec mcpslackbot node tests/test_refresh.js
 ```
 
-#### 3. Testing via HTTP Endpoint
+### Real-World Scenario Testing
 
-If the application is running (locally or in production), you can test the refresh token via an HTTP endpoint:
+Test automatic token refresh when access token expires:
+
+1. Use an old/expired `BEARER_TOKEN`
+2. Trigger a Slack command: `/mcp MC123456`
+3. Watch logs for automatic refresh:
+   ```bash
+   docker-compose logs -f mcpslackbot
+   ```
+
+Expected log sequence:
+```
+Fetching data for MC number: mc123456, attempt 1
+Access token expired or invalid. Attempting refresh...
+Attempting to refresh access token...
+Access token refreshed successfully.
+New refresh token received.
+Tokens saved to database
+Token refreshed. Retrying API call...
+Fetching data for MC number: mc123456, attempt 2
+Data received for MC number: mc123456
+Sending Slack response for MC number: mc123456
+```
+
+### Monitoring Token Activity
 
 ```bash
-# Test the refresh token endpoint
-curl http://localhost:3001/test/refresh
+# Watch for refresh activity
+docker-compose logs -f mcpslackbot | grep -i -E "(refresh|token|401)"
 
-# With better formatting (if you have jq installed)
-curl http://localhost:3001/test/refresh | jq
-
-# For production (replace with your server URL)
-curl https://your-production-server:3001/test/refresh
+# Check database last update time
+docker-compose exec mcpslackbot node -e "
+  const { createClient } = require('@libsql/client');
+  const db = createClient({ url: 'http://libsql:8080' });
+  db.execute('SELECT updated_at FROM tokens WHERE id = 1').then(r => console.log('Last updated:', r.rows[0]?.updated_at));
+"
 ```
 
-**Expected JSON response:**
-```json
-{
-  "status": "success",
-  "message": "Token refreshed successfully",
-  "newTokenPrefix": "TM8GfS8N7MusRc5Q_6Nm...",
-  "hasNewRefreshToken": true
-}
+### Success Indicators
+
+✅ **Everything working correctly:**
+- Database initializes on startup
+- Tokens loaded from database (not environment)
+- Health endpoint responds
+- Refresh test passes
+- Slack commands work
+- 401 errors trigger automatic refresh
+- New tokens saved to database
+- Container restarts preserve tokens
+
+❌ **Potential issues:**
+- `REFRESH_TOKEN not found in database or environment` - Need to seed database
+- `Error refreshing access token: {"error": "invalid_grant"}` - Refresh token expired/invalid
+- `Error loading tokens from database` - Database connection issue
+- Tokens revert after restart - Volume not persisting correctly
+
+## Troubleshooting
+
+### Containers won't start
+
+**Check logs:**
+```bash
+docker-compose logs
 ```
 
-You can also open the endpoint directly in your browser:
-```
-http://localhost:3001/test/refresh
+**Common issues:**
+- Port 3001 or 8080 already in use - change `PORT` in `.env`
+- Missing environment variables - verify `.env` file exists and is complete
+- Permission issues - ensure user can access Docker socket
+
+### Database connection errors
+
+**Verify libSQL is running:**
+```bash
+docker-compose ps libsql
+curl http://localhost:8080/health
 ```
 
-#### 4. Testing in Production
+**Check network:**
+```bash
+docker-compose exec mcpslackbot ping -c 3 libsql
+```
 
-**Via SSH into your production server:**
+**Reset database:**
+```bash
+docker-compose down
+docker volume rm mcp-slackbot_libsql-data
+docker-compose up -d
+```
+
+### Tokens not persisting
+
+**Check volume exists:**
+```bash
+docker volume ls | grep libsql
+```
+
+**Inspect volume:**
+```bash
+docker volume inspect mcp-slackbot_libsql-data
+```
+
+**Verify database has data:**
+```bash
+docker-compose exec mcpslackbot node -e "
+  const { createClient } = require('@libsql/client');
+  const db = createClient({ url: 'http://libsql:8080' });
+  db.execute('SELECT COUNT(*) as count FROM tokens').then(r => console.log('Token count:', r.rows[0]?.count));
+"
+```
+
+### Refresh token fails
+
+**Get detailed error:**
+```bash
+docker-compose exec mcpslackbot node tests/test_refresh.js
+```
+
+**Check token endpoint URL:**
+```bash
+docker-compose exec mcpslackbot printenv TOKEN_ENDPOINT_URL
+# Should be: https://api.mycarrierpackets.com/token
+```
+
+**Obtain fresh tokens:**
+```bash
+curl -X POST https://api.mycarrierpackets.com/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=password&username=YOUR_USERNAME&password=YOUR_PASSWORD"
+```
+
+Then update tokens in database (see "Updating Tokens" section).
+
+### Slack commands not working
+
+**Verify Slack configuration:**
+1. Request URL must be publicly accessible
+2. Signing secret must match
+3. Bot has required scopes
+
+**Check signature verification:**
+```bash
+docker-compose logs mcpslackbot | grep -i signature
+```
+
+**Test health endpoint externally:**
+```bash
+curl https://your-public-url.com/health
+```
+
+## Security Best Practices
+
+- ✅ **Never commit `.env` files** - Already in `.gitignore`
+- ✅ **Use Docker secrets in production** - Configured in `docker-compose.yml`
+- ✅ **Rotate credentials regularly** - Automatic for access/refresh tokens
+- ✅ **Use HTTPS for public endpoints** - Required by Slack
+- ✅ **Restrict test endpoints** - `/test/refresh` disabled in production
+- ✅ **Backup database regularly** - Contains sensitive tokens
+- ✅ **Use `.env.example`** - Never contains real credentials
+- ✅ **Implement volume encryption** - Consider for libsql-data volume
+- ✅ **Monitor access logs** - Track unusual activity
+
+## Maintenance
+
+### Updating the Application
 
 ```bash
-# SSH into your server
-ssh user@your-production-server
+# Pull latest code
+git pull origin main
 
-# Test the refresh token directly
-docker exec mcpslackbot node tests/test_refresh.js
+# Rebuild and restart
+docker-compose down
+docker-compose up -d --build
 
-# Test via HTTP endpoint
-curl http://localhost:3001/test/refresh
-
-# Monitor logs for refresh activity
-docker logs -f mcpslackbot | grep -i refresh
+# Verify
+docker-compose logs -f
 ```
 
-**Automatic verification during deployment:**
+### Database Maintenance
 
-The GitHub Actions deployment workflow automatically tests the refresh token after deployment. Check the "Test refresh token" step in your GitHub Actions logs to verify it passed.
-
-#### 5. Real-World Scenario Testing
-
-To verify automatic refresh when a token expires:
-
-1. Temporarily set an expired `BEARER_TOKEN` in your environment
-2. Restart the container/application
-3. Send a Slack command: `/mcp 12345`
-4. Check your server logs - you should see:
-   - "Access token expired or invalid. Attempting refresh..."
-   - "Attempting to refresh access token..."
-   - "Access token refreshed successfully."
-   - "Token refreshed. Retrying API call..."
-
-#### 6. Monitoring Refresh Token Activity
-
-**Watch logs continuously:**
-
+**View database statistics:**
 ```bash
-# Monitor logs for any refresh token activity
-docker logs -f mcpslackbot | grep -i -E "(refresh|token|401)"
-
-# Or view all logs
-docker logs -f mcpslackbot
+docker-compose exec mcpslackbot node -e "
+  const { createClient } = require('@libsql/client');
+  const db = createClient({ url: 'http://libsql:8080' });
+  db.execute('SELECT * FROM tokens').then(r => console.log(JSON.stringify(r.rows, null, 2)));
+"
 ```
 
-**What to look for:**
+**Scheduled backups:**
 
-✅ **Success indicators:**
-- "Access token refreshed successfully."
-- "New refresh token received." (if provided by API)
-- API calls succeed after token refresh
-
-❌ **Failure indicators:**
-- "Error refreshing access token: ..."
-- "Refresh token might be invalid or expired..."
-- API calls fail with 401 even after refresh attempt
-
-### Testing Bearer Token
-
-To test your bearer token against the API:
-
+Create a cron job:
 ```bash
-# Using Docker
-docker compose run --rm mcpslackbot npm run test:token
+# Edit crontab
+crontab -e
 
-# Without Docker
-npm run test:token
+# Add daily backup at 2 AM
+0 2 * * * cd /path/to/mcp-slackbot && docker-compose down && docker run --rm -v mcp-slackbot_libsql-data:/data -v $(pwd)/backups:/backup alpine tar czf /backup/libsql-$(date +\%Y\%m\%d).tar.gz -C /data . && docker-compose up -d
 ```
-
-## Security Notes
-
--   **Never commit your `.env` file (or any file with real credentials) to version control.** The `.gitignore` file should already list `.env`.
--   Keep your API tokens and secrets secure.
--   Consider using a secrets management solution for production environments.
--   Regularly rotate your credentials if possible.
--   The `.env.example` file is a template and should **never** contain real credentials.
 
 ## License
 
 This project is licensed under version 3 of the GNU Affero General Public License (AGPL-3.0). See the `LICENSE.TXT` file for details.
+
+## Support
+
+For issues or questions:
+- GitHub Issues: https://github.com/freightcognition/mcp-slackbot/issues
+- Contact: Anthony Fecarotta (freightCognition / linehaul.ai)
