@@ -12,7 +12,7 @@
 **/*.dbmdl
 **/*.jfm
 **/charts
-**/docker-compose*
+**/docker compose*
 **/compose*
 **/Dockerfile*
 **/node_modules
