@@ -30,7 +30,7 @@ Add token persistence using libSQL (sqld) to ensure OAuth refresh tokens survive
 
 ### Changes
 
-**File: `docker-compose.yml`**
+**File: `docker compose.yml`**
 
 ```yaml
 services:
@@ -73,7 +73,7 @@ volumes:
 
 ### Success Criteria
 
-- [x] `docker-compose up -d` starts both containers
+- [x] `docker compose up -d` starts both containers
 - [x] libSQL accessible at `http://localhost:8080`
 - [x] Data persists in `libsql-data` volume
 
@@ -254,12 +254,12 @@ startServer().catch(err => {
     EOF
 ```
 
-2. **Update container start to use docker-compose:**
+2. **Update container start to use docker compose:**
 ```yaml
 - name: Start containers
   run: |
-    echo "Starting containers with docker-compose..."
-    docker-compose up -d --build
+    echo "Starting containers with docker compose..."
+    docker compose up -d --build
 ```
 
 3. **Update verify step for compose:**
@@ -268,20 +268,20 @@ startServer().catch(err => {
   run: |
     echo "Waiting for containers to start..."
     sleep 15
-    if docker-compose ps | grep -q "Up"; then
+    if docker compose ps | grep -q "Up"; then
       echo "✅ Containers are running!"
-      docker-compose ps
+      docker compose ps
       echo "Testing health endpoint..."
       if curl -f http://localhost:3001/health; then
         echo "✅ Health check passed!"
       else
         echo "❌ Health check failed!"
-        docker-compose logs
+        docker compose logs
         exit 1
       fi
     else
       echo "❌ Containers failed to start!"
-      docker-compose logs
+      docker compose logs
       exit 1
     fi
 ```
@@ -291,11 +291,11 @@ startServer().catch(err => {
 - name: Test refresh token
   run: |
     echo "Testing refresh token functionality..."
-    if docker-compose exec -T mcpslackbot node tests/test_refresh.js; then
+    if docker compose exec -T mcpslackbot node tests/test_refresh.js; then
       echo "✅ Refresh token test passed!"
     else
       echo "❌ Refresh token test failed!"
-      docker-compose logs
+      docker compose logs
       exit 1
     fi
 ```
@@ -303,7 +303,7 @@ startServer().catch(err => {
 ### Success Criteria
 
 - [x] GitHub Actions workflow completes successfully
-- [x] Both containers start via docker-compose
+- [x] Both containers start via docker compose
 - [x] Health check passes
 - [x] Refresh token test passes
 
@@ -453,9 +453,9 @@ runTest().catch(error => {
 
 ### Test Procedure
 
-1. **Deploy with docker-compose:**
+1. **Deploy with docker compose:**
    ```bash
-   docker-compose up -d --build
+   docker compose up -d --build
    ```
 
 2. **Verify libSQL is running:**
@@ -465,7 +465,7 @@ runTest().catch(error => {
 
 3. **Check tokens were saved:**
    ```bash
-   docker-compose exec mcpslackbot node -e "
+   docker compose exec mcpslackbot node -e "
      const { createClient } = require('@libsql/client');
      const db = createClient({ url: 'http://libsql:8080' });
      db.execute('SELECT * FROM tokens').then(r => console.log(r.rows));
@@ -474,13 +474,13 @@ runTest().catch(error => {
 
 4. **Test refresh:**
    ```bash
-   docker-compose exec mcpslackbot node tests/test_refresh.js
+   docker compose exec mcpslackbot node tests/test_refresh.js
    ```
 
 5. **Restart and verify persistence:**
    ```bash
-   docker-compose restart mcpslackbot
-   docker-compose exec mcpslackbot node -e "
+   docker compose restart mcpslackbot
+   docker compose exec mcpslackbot node -e "
      const { createClient } = require('@libsql/client');
      const db = createClient({ url: 'http://libsql:8080' });
      db.execute('SELECT * FROM tokens').then(r => console.log(r.rows));
@@ -503,12 +503,12 @@ runTest().catch(error => {
 
 | File | Action | Description |
 |------|--------|-------------|
-| `docker-compose.yml` | Modify | Add libSQL service and volume |
+| `docker compose.yml` | Modify | Add libSQL service and volume |
 | `package.json` | Modify | Add @libsql/client dependency |
 | `db.js` | Create | New database module |
 | `app.js` | Modify | Use database for tokens, remove updateEnvFile |
 | `tests/test_refresh.js` | Modify | Use database instead of .env |
-| `.github/workflows/deploy.yml` | Modify | Use docker-compose, add LIBSQL_URL |
+| `.github/workflows/deploy.yml` | Modify | Use docker compose, add LIBSQL_URL |
 
 ---
 
@@ -518,7 +518,7 @@ If issues occur:
 
 1. Revert to environment-only tokens:
    ```bash
-   git checkout main -- docker-compose.yml app.js package.json
+   git checkout main -- docker compose.yml app.js package.json
    ```
 
 2. Remove libSQL volume:
@@ -533,5 +533,5 @@ If issues occur:
 ## Sources
 
 - [libSQL Docker Documentation](https://github.com/tursodatabase/libsql/blob/main/docs/DOCKER.md)
-- [libSQL docker-compose example](https://github.com/tursodatabase/libsql/blob/main/docker-compose/docker-compose.yml)
+- [libSQL docker compose example](https://github.com/tursodatabase/libsql/blob/main/docker compose/docker compose.yml)
 - [@libsql/client npm package](https://www.npmjs.com/package/@libsql/client)
