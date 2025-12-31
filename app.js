@@ -1,14 +1,8 @@
-const express = require('express');
+const { App } = require('@slack/bolt');
 const axios = require('axios');
-const crypto = require('crypto');
-const rawBody = require('raw-body');
-const timingSafeCompare = require('tsscmp');
 const qs = require('qs');
 require('dotenv').config();
 const { initDb, getTokens, saveTokens } = require('./db');
-
-const app = express();
-const port = process.env.PORT || 3001;
 
 // Environment variables
 let BEARER_TOKEN = process.env.BEARER_TOKEN;
@@ -16,40 +10,31 @@ let REFRESH_TOKEN = process.env.REFRESH_TOKEN;
 const TOKEN_ENDPOINT_URL = process.env.TOKEN_ENDPOINT_URL;
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
+const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
 const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET;
-const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
+const SLACK_APP_TOKEN = process.env.SLACK_APP_TOKEN;
 
 // Verify required environment variables
-if (!BEARER_TOKEN) {
-  console.error('BEARER_TOKEN environment variable is required');
-  process.exit(1);
-}
-if (!REFRESH_TOKEN) {
-  console.error('REFRESH_TOKEN environment variable is required');
-  process.exit(1);
-}
-if (!TOKEN_ENDPOINT_URL) {
-  console.error('TOKEN_ENDPOINT_URL environment variable is required');
-  process.exit(1);
-}
-if (!CLIENT_ID) {
-  console.error('CLIENT_ID environment variable is required');
-  process.exit(1);
-}
-if (!CLIENT_SECRET) {
-  console.error('CLIENT_SECRET environment variable is required');
-  process.exit(1);
+const requiredEnvVars = [
+  'BEARER_TOKEN', 'REFRESH_TOKEN', 'TOKEN_ENDPOINT_URL',
+  'CLIENT_ID', 'CLIENT_SECRET', 'SLACK_BOT_TOKEN',
+  'SLACK_SIGNING_SECRET', 'SLACK_APP_TOKEN'
+];
+
+for (const envVar of requiredEnvVars) {
+  if (!process.env[envVar]) {
+    console.error(`${envVar} environment variable is required`);
+    process.exit(1);
+  }
 }
 
-if (!SLACK_SIGNING_SECRET) {
-  console.error('SLACK_SIGNING_SECRET environment variable is required');
-  process.exit(1);
-}
-
-if (!SLACK_WEBHOOK_URL) {
-  console.error('SLACK_WEBHOOK_URL environment variable is required');
-  process.exit(1);
-}
+// Initialize Bolt App
+const app = new App({
+  token: SLACK_BOT_TOKEN,
+  signingSecret: SLACK_SIGNING_SECRET,
+  socketMode: true,
+  appToken: SLACK_APP_TOKEN,
+});
 
 // Load tokens from database on startup
 async function loadTokens() {
@@ -70,20 +55,6 @@ async function loadTokens() {
     console.log('Falling back to environment variables');
   }
 }
-
-// Raw body parsing for Slack signature verification
-app.use(express.json({
-  verify: (req, res, buf) => {
-    req.rawBody = buf;
-  }
-}));
-
-app.use(express.urlencoded({ 
-  extended: true,
-  verify: (req, res, buf) => {
-    req.rawBody = buf;
-  }
-}));
 
 function getRiskLevelEmoji(points) {
   if (points >= 0 && points <= 124) {
@@ -118,83 +89,6 @@ function formatInfractions(infractions) {
     return `- ${infraction.RuleText}: ${infraction.RuleOutput} (${infraction.Points} points)`;
   }).join('\n');
 }
-
-// Middleware to verify Slack requests
-const verifySlackRequest = (req, res, next) => {
-  const signature = req.headers['x-slack-signature'];
-  const timestamp = req.headers['x-slack-request-timestamp'];
-
-  if (!signature || !timestamp) {
-    console.error('Missing required Slack headers');
-    return res.status(400).send('Missing required headers');
-  }
-
-  // Check for replay attacks
-  const fiveMinutesAgo = Math.floor(Date.now() / 1000) - 60 * 5;
-  if (timestamp < fiveMinutesAgo) {
-    console.error('Request is too old');
-    return res.status(400).send('Request is too old');
-  }
-
-  const sigBasestring = `v0:${timestamp}:${req.rawBody}`;
-  const mySignature = 'v0=' + 
-    crypto.createHmac('sha256', SLACK_SIGNING_SECRET)
-      .update(sigBasestring, 'utf8')
-      .digest('hex');
-
-  if (!timingSafeCompare(mySignature, signature)) {
-    console.error('Invalid signature');
-    return res.status(401).send('Invalid signature');
-  }
-
-  next();
-};
-
-// Middleware to verify test endpoint requests
-const verifyTestEndpointAuth = (req, res, next) => {
-  // Require an API key for test endpoints
-  const authHeader = req.headers['authorization'];
-  const apiKey = req.headers['x-api-key'];
-
-  // Check for either Bearer token or X-API-Key header
-  if (!authHeader && !apiKey) {
-    console.error('Missing authentication for test endpoint');
-    return res.status(401).json({
-      status: 'error',
-      message: 'Unauthorized: Missing authentication'
-    });
-  }
-
-  // Verify against a test API key from environment
-  const validApiKey = process.env.TEST_API_KEY;
-
-  if (!validApiKey) {
-    console.error('TEST_API_KEY not configured');
-    return res.status(503).json({
-      status: 'error',
-      message: 'Service unavailable: Authentication not configured'
-    });
-  }
-
-  // Check X-API-Key header
-  if (apiKey && timingSafeCompare(apiKey, validApiKey)) {
-    return next();
-  }
-
-  // Check Authorization: Bearer header
-  if (authHeader) {
-    const token = authHeader.replace('Bearer ', '');
-    if (timingSafeCompare(token, validApiKey)) {
-      return next();
-    }
-  }
-
-  console.error('Invalid authentication credentials for test endpoint');
-  return res.status(401).json({
-    status: 'error',
-    message: 'Unauthorized: Invalid credentials'
-  });
-};
 
 // Function to refresh the access token
 async function refreshAccessToken() {
@@ -243,14 +137,55 @@ async function refreshAccessToken() {
   }
 }
 
-app.post('/slack/commands', verifySlackRequest, async (req, res) => {
-  const { text, response_url } = req.body;
 
-  if (!text) {
-    return res.send('Please provide a valid MC number.');
+// Hanlde MCP command
+app.command('/mcp', async ({ ack, body, client }) => {
+  await ack();
+
+  try {
+    await client.views.open({
+      trigger_id: body.trigger_id,
+      view: {
+        type: 'modal',
+        private_metadata: body.channel_id,
+        callback_id: 'mcp_modal_submission',
+        title: {
+          type: 'plain_text',
+          text: 'MCP Risk Assessment'
+        },
+        blocks: [
+          {
+            type: 'input',
+            block_id: 'mc_number_block',
+            label: {
+              type: 'plain_text',
+              text: 'Enter MC Number'
+            },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'mc_number_input'
+            }
+          }
+        ],
+        submit: {
+          type: 'plain_text',
+          text: 'Submit'
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error opening modal:', error);
   }
+});
 
-  const mcNumber = text.trim();
+
+// Hanlde MCP modal submission
+app.view('mcp_modal_submission', async ({ ack, body, view, client }) => {
+  await ack();
+
+  const mcNumber = view.state.values.mc_number_block.mc_number_input.value.trim();
+  const user = body.user.id;
+  const channelId = view.private_metadata;
   let attempt = 0;
   const maxAttempts = 2;
 
@@ -272,7 +207,12 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
 
       if (!apiResponse.data || apiResponse.data.length === 0) {
         console.log(`No data found for MC number: ${mcNumber}`);
-        return res.send('No data found for the provided MC number.');
+        await client.chat.postEphemeral({
+          channel: channelId,
+          user: user,
+          text: `No data found for MC number: ${mcNumber}`
+        });
+        return;
       }
 
       const data = apiResponse.data[0];
@@ -342,9 +282,9 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
 
       // Add MyCarrierProtect section
       const mcpData = {
-        TotalPoints: (data.IsBlocked ? 1000 : 0) + (data.FreightValidateStatus === 'Review Recommended' ? 1000 : 0), 
+        TotalPoints: (data.IsBlocked ? 1000 : 0) + (data.FreightValidateStatus === 'Review Recommended' ? 1000 : 0),
         OverallRating: getRiskLevel((data.IsBlocked ? 1000 : 0) + (data.FreightValidateStatus === 'Review Recommended' ? 1000 : 0)),
-        Infractions: [] 
+        Infractions: []
       };
       if (data.IsBlocked) {
         mcpData.Infractions.push({
@@ -389,33 +329,11 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
         );
       }
 
-      const slackResponse = {
-        response_type: 'in_channel',
+      await client.chat.postMessage({
+        channel: channelId,
+        text: `MCP Risk Assessment for MC #${mcNumber}`,
         blocks: blocks
-      };
-
-      console.log(`Sending Slack response for MC number: ${mcNumber}`);
-      
-      // Send immediate acknowledgment
-      res.send();
-
-      // Send detailed response via webhook
-      try {
-        await axios.post(SLACK_WEBHOOK_URL, slackResponse, { 
-          headers: { 'Content-Type': 'application/json' },
-          timeout: 5000 
-        });
-      } catch (webhookError) {
-        console.error('Error sending webhook response:', webhookError);
-        // Try fallback to response_url if webhook fails
-        if (response_url) {
-          try {
-            await axios.post(response_url, slackResponse, { timeout: 5000 });
-          } catch (fallbackError) {
-            console.error('Error sending fallback response:', fallbackError);
-          }
-        }
-      }
+      });
 
       return;
     } catch (error) {
@@ -427,7 +345,12 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
           attempt++;
         } else {
           console.error('Failed to refresh token. Aborting.');
-          return res.send("Error: Could not refresh authentication. Please check logs or contact admin.");
+          await client.chat.postEphemeral({
+            channel: channelId,
+            user: user,
+            text: "Error: Could not refresh authentication. Please check logs or contact admin."
+          });
+          return;
         }
       } else {
         console.error('API call failed or max retries reached:', error.response ? JSON.stringify(error.response.data, null, 2) : error.message);
@@ -435,60 +358,26 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
         if (error.response && error.response.status === 401) {
             userMessage = 'Authentication failed even after attempting to refresh. Please contact an administrator.';
         }
-        return res.send(userMessage);
+        await client.chat.postEphemeral({
+          channel: channelId,
+          user: user,
+          text: userMessage
+        });
+        return;
       }
     }
-  } // end while loop
-});
-
-// Add basic health check endpoint
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'healthy' });
-});
-
-// Test endpoint for refresh token verification (for testing/debugging)
-app.get('/test/refresh', verifyTestEndpointAuth, async (req, res) => {
-  // Only allow in non-production environments
-  if (process.env.NODE_ENV === 'production') {
-    return res.status(404).json({ status: 'error', message: 'Not found' });
-  }
-
-  try {
-    console.log('Refresh token test endpoint called');
-    const result = await refreshAccessToken();
-    if (result.success) {
-      res.json({
-        status: 'success',
-        message: 'Token refreshed successfully',
-        timestamp: new Date().toISOString(),
-        hasNewRefreshToken: result.newRefreshIssued
-      });
-    } else {
-      res.status(500).json({
-        status: 'error',
-        message: 'Failed to refresh token. Check server logs for details.',
-        timestamp: new Date().toISOString()
-      });
-    }
-  } catch (error) {
-    console.error('Error in refresh test endpoint:', error);
-    res.status(500).json({
-      status: 'error',
-      message: error.message,
-      timestamp: new Date().toISOString()
-    });
   }
 });
+
 
 // Start server with database initialization
-async function startServer() {
-  await loadTokens();
-  app.listen(port, () => {
-    console.log(`Server is running on port ${port}`);
-  });
-}
-
-startServer().catch(err => {
-  console.error('Failed to start server:', err);
-  process.exit(1);
-});
+(async () => {
+  try {
+    await loadTokens();
+    await app.start();
+    console.log('⚡️ Bolt app is running!');
+  } catch (error) {
+    console.error('Failed to start server:', err);
+    process.exit(1);
+  }
+})();
