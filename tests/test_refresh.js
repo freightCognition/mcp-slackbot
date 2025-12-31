@@ -37,9 +37,7 @@ async function refreshAccessToken() {
   try {
     const data = qs.stringify({
       grant_type: 'refresh_token',
-      refresh_token: REFRESH_TOKEN,
-      client_id: CLIENT_ID,
-      client_secret: CLIENT_SECRET
+      refresh_token: REFRESH_TOKEN
     });
 
     const response = await axios.post(TOKEN_ENDPOINT_URL, data, {
