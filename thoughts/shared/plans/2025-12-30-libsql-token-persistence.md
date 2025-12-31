@@ -30,7 +30,7 @@ Add token persistence using libSQL (sqld) to ensure OAuth refresh tokens survive
 
 ### Changes
 
-**File: `docker compose.yml`**
+**File: `docker-compose.yml`**
 
 ```yaml
 services:
@@ -38,11 +38,11 @@ services:
     image: ghcr.io/tursodatabase/libsql-server:latest
     platform: linux/amd64
     ports:
-      - "8080:8080"
+      - "8081:8081"
     volumes:
       - libsql-data:/var/lib/sqld
     environment:
-      - SQLD_HTTP_LISTEN_ADDR=0.0.0.0:8080
+      - SQLD_HTTP_LISTEN_ADDR=0.0.0.0:8081
     restart: unless-stopped
 
   mcpslackbot:
@@ -54,7 +54,7 @@ services:
       - libsql
     environment:
       NODE_ENV: production
-      LIBSQL_URL: http://libsql:8080
+      LIBSQL_URL: http://libsql:8081
       BEARER_TOKEN: ${BEARER_TOKEN}
       REFRESH_TOKEN: ${REFRESH_TOKEN}
       TOKEN_ENDPOINT_URL: ${TOKEN_ENDPOINT_URL}
@@ -99,7 +99,7 @@ volumes:
 const { createClient } = require('@libsql/client');
 
 const db = createClient({
-  url: process.env.LIBSQL_URL || 'http://localhost:8080'
+  url: process.env.LIBSQL_URL || 'http://localhost:8081'
 });
 
 // Initialize schema
@@ -243,7 +243,7 @@ startServer().catch(err => {
     cat > .env << EOF
     NODE_ENV=production
     PORT=3001
-    LIBSQL_URL=http://libsql:8080
+    LIBSQL_URL=http://libsql:8081
     BEARER_TOKEN=${{ secrets.BEARER_TOKEN }}
     REFRESH_TOKEN=${{ secrets.REFRESH_TOKEN }}
     TOKEN_ENDPOINT_URL=${{ secrets.TOKEN_ENDPOINT_URL }}
@@ -326,7 +326,7 @@ const { createClient } = require('@libsql/client');
 
 // Database connection
 const db = createClient({
-  url: process.env.LIBSQL_URL || 'http://localhost:8080'
+  url: process.env.LIBSQL_URL || 'http://localhost:8081'
 });
 
 // Environment variables (fallback)
@@ -460,14 +460,14 @@ runTest().catch(error => {
 
 2. **Verify libSQL is running:**
    ```bash
-   curl http://localhost:8080/health
+   curl http://localhost:8081/health
    ```
 
 3. **Check tokens were saved:**
    ```bash
    docker compose exec mcpslackbot node -e "
      const { createClient } = require('@libsql/client');
-     const db = createClient({ url: 'http://libsql:8080' });
+     const db = createClient({ url: 'http://libsql:8081' });
      db.execute('SELECT * FROM tokens').then(r => console.log(r.rows));
    "
    ```
@@ -482,7 +482,7 @@ runTest().catch(error => {
    docker compose restart mcpslackbot
    docker compose exec mcpslackbot node -e "
      const { createClient } = require('@libsql/client');
-     const db = createClient({ url: 'http://libsql:8080' });
+     const db = createClient({ url: 'http://libsql:8081' });
      db.execute('SELECT * FROM tokens').then(r => console.log(r.rows));
    "
    ```
@@ -503,7 +503,7 @@ runTest().catch(error => {
 
 | File | Action | Description |
 |------|--------|-------------|
-| `docker compose.yml` | Modify | Add libSQL service and volume |
+| `docker-compose.yml` | Modify | Add libSQL service and volume (port 8081) |
 | `package.json` | Modify | Add @libsql/client dependency |
 | `db.js` | Create | New database module |
 | `app.js` | Modify | Use database for tokens, remove updateEnvFile |
@@ -518,7 +518,7 @@ If issues occur:
 
 1. Revert to environment-only tokens:
    ```bash
-   git checkout main -- docker compose.yml app.js package.json
+   git checkout main -- docker-compose.yml app.js package.json
    ```
 
 2. Remove libSQL volume:
