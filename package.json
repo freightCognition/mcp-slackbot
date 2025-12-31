@@ -1,7 +1,7 @@
 {
   "name": "mcp-slackbot",
   "version": "2.1.4",
-  "description": "freightCognition open-source app to execute Carrier Risk Assessments, with the MyCarrierPortal API, from within your Slack environment.",
+  "description": "linehaul.ai open-source app to execute Carrier Risk Assessments, with the MyCarrierPortal API, from within your Slack environment.",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
@@ -19,7 +19,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/freightcognition/mcp-slackbot.git"
+    "url": "https://github.com/linehaul.ai/mcp-slackbot.git"
   },
   "license": "MIT",
   "dependencies": {
@@ -46,7 +46,7 @@
     "fakebizprez",
     "linehaul.ai"
   ],
-  "author": "freightCognition",
+  "author": "linehaul.ai",
   "engines": {
     "node": ">=18.0.0"
   }
