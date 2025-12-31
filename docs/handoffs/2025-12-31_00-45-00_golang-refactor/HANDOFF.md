@@ -70,7 +70,7 @@ Files produced/updated in this session:
 1. **Initialize Go module**:
    ```bash
    mkdir cmd pkg internal
-   go mod init github.com/freightcognition/mcp-slackbot
+   go mod init github.com/linehaul.ai/mcp-slackbot
    ```
 
 2. **Add dependencies**:

@@ -2,7 +2,7 @@
 
 A Slack bot for executing Carrier Risk Assessments using the MyCarrierPortal API within your Slack environment.
 
-*Brought to you by Anthony Fecarotta of freightCognition & linehaul.ai*
+*Brought to you by Anthony Fecarotta of linehaul.ai & linehaul.ai*
 
 ![MCP Slackbot Screenshot](./MCP-Slackbot-Screenshot.png)
 
@@ -27,7 +27,7 @@ Token persistence ensures OAuth refresh tokens survive container restarts and en
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/freightcognition/mcp-slackbot.git
+git clone https://github.com/linehaul.ai/mcp-slackbot.git
 cd mcp-slackbot
 ```
 
@@ -689,5 +689,5 @@ This project is licensed under version 3 of the GNU Affero General Public Licens
 ## Support
 
 For issues or questions:
-- GitHub Issues: https://github.com/freightcognition/mcp-slackbot/issues
-- Contact: Anthony Fecarotta (freightCognition / linehaul.ai)
+- GitHub Issues: https://github.com/linehaul.ai/mcp-slackbot/issues
+- Contact: Anthony Fecarotta (linehaul.ai / linehaul.ai)
