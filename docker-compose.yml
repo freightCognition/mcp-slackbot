@@ -1,11 +1,25 @@
 services:
+  libsql:
+    image: ghcr.io/tursodatabase/libsql-server:latest
+    platform: linux/amd64
+    ports:
+      - "8080:8080"
+    volumes:
+      - libsql-data:/var/lib/sqld
+    environment:
+      - SQLD_HTTP_LISTEN_ADDR=0.0.0.0:8080
+    restart: unless-stopped
+
   mcpslackbot:
     image: mcpslackbot
     build:
       context: .
       dockerfile: ./Dockerfile
+    depends_on:
+      - libsql
     environment:
       NODE_ENV: production
+      LIBSQL_URL: http://libsql:8080
       BEARER_TOKEN: ${BEARER_TOKEN}
       REFRESH_TOKEN: ${REFRESH_TOKEN}
       TOKEN_ENDPOINT_URL: ${TOKEN_ENDPOINT_URL}
@@ -17,3 +31,6 @@ services:
     ports:
       - 3001:3001
     restart: unless-stopped
+
+volumes:
+  libsql-data:
