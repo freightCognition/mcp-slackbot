@@ -1,25 +1,25 @@
-FROM node:18-alpine
+FROM oven/bun:1-alpine
 
 # Set working directory
 WORKDIR /usr/src/app
 
 # Copy package files
-COPY package*.json ./
+COPY package.json bun.lock ./
 
 # Install dependencies
-RUN npm install --omit=dev
+RUN bun install --production
 
 # Copy app source
 COPY . .
 
-# Set proper permissions
-RUN chown -R node:node /usr/src/app
+# Set proper permissions (bun user exists in oven/bun image)
+RUN chown -R bun:bun /usr/src/app
 
 # Use non-root user
-USER node
+USER bun
 
 # Expose port
 EXPOSE 3001
 
 # Start the application
-CMD ["npm", "start"]
+CMD ["bun", "run", "start"]

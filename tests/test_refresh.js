@@ -23,7 +23,7 @@ async function loadTokens() {
       REFRESH_TOKEN = result.rows[0].refresh_token;
       console.log('Loaded tokens from database');
     }
-  } catch (error) {
+  } catch (error) { // eslint-disable-line no-unused-vars
     console.log('Could not load from database, using environment variables');
   }
 }

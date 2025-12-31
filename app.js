@@ -1,7 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const crypto = require('crypto');
-const rawBody = require('raw-body');
+// const rawBody = require('raw-body');
 const timingSafeCompare = require('tsscmp');
 const qs = require('qs');
 require('dotenv').config();
@@ -78,7 +78,7 @@ app.use(express.json({
   }
 }));
 
-app.use(express.urlencoded({ 
+app.use(express.urlencoded({
   extended: true,
   verify: (req, res, buf) => {
     req.rawBody = buf;
@@ -110,6 +110,7 @@ function getRiskLevel(points) {
 }
 
 // Helper function to format infraction details
+// eslint-disable-next-line no-unused-vars
 function formatInfractions(infractions) {
   if (!infractions || infractions.length === 0) {
     return "No infractions found.";
@@ -137,7 +138,7 @@ const verifySlackRequest = (req, res, next) => {
   }
 
   const sigBasestring = `v0:${timestamp}:${req.rawBody}`;
-  const mySignature = 'v0=' + 
+  const mySignature = 'v0=' +
     crypto.createHmac('sha256', SLACK_SIGNING_SECRET)
       .update(sigBasestring, 'utf8')
       .digest('hex');
@@ -342,9 +343,9 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
 
       // Add MyCarrierProtect section
       const mcpData = {
-        TotalPoints: (data.IsBlocked ? 1000 : 0) + (data.FreightValidateStatus === 'Review Recommended' ? 1000 : 0), 
+        TotalPoints: (data.IsBlocked ? 1000 : 0) + (data.FreightValidateStatus === 'Review Recommended' ? 1000 : 0),
         OverallRating: getRiskLevel((data.IsBlocked ? 1000 : 0) + (data.FreightValidateStatus === 'Review Recommended' ? 1000 : 0)),
-        Infractions: [] 
+        Infractions: []
       };
       if (data.IsBlocked) {
         mcpData.Infractions.push({
@@ -395,15 +396,15 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
       };
 
       console.log(`Sending Slack response for MC number: ${mcNumber}`);
-      
+
       // Send immediate acknowledgment
       res.send();
 
       // Send detailed response via webhook
       try {
-        await axios.post(SLACK_WEBHOOK_URL, slackResponse, { 
+        await axios.post(SLACK_WEBHOOK_URL, slackResponse, {
           headers: { 'Content-Type': 'application/json' },
-          timeout: 5000 
+          timeout: 5000
         });
       } catch (webhookError) {
         console.error('Error sending webhook response:', webhookError);
