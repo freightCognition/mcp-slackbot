@@ -58,7 +58,7 @@ NODE_ENV=production
 PORT=3001
 
 # Database Configuration (optional - defaults shown)
-LIBSQL_URL=http://libsql:8080
+LIBSQL_URL=http://libsql:8081
 ```
 
 **Important Notes:**
@@ -166,7 +166,7 @@ Expected response:
 ```bash
 docker compose exec mcpslackbot node -e "
   const { createClient } = require('@libsql/client');
-  const db = createClient({ url: 'http://libsql:8080' });
+  const db = createClient({ url: 'http://libsql:8081' });
   db.execute('SELECT bearer_token, refresh_token, updated_at FROM tokens').then(r => console.log(r.rows));
 "
 ```
@@ -402,7 +402,7 @@ ngrok http 3001
 | `SLACK_BOT_TOKEN` | No* | Slack bot token | `xoxb-...` |
 | `NODE_ENV` | No | Environment mode | `production` or `development` |
 | `PORT` | No | Application port | `3001` (default) |
-| `LIBSQL_URL` | No | Database connection URL | `http://libsql:8080` (default) |
+| `LIBSQL_URL` | No | Database connection URL | `http://libsql:8081` (default) |
 | `TEST_API_KEY` | No | API key for test endpoints | `secure_random_string` |
 
 *Currently configured but not actively used by the application
@@ -507,7 +507,7 @@ docker compose logs -f mcpslackbot | grep -i -E "(refresh|token|401)"
 # Check database last update time
 docker compose exec mcpslackbot node -e "
   const { createClient } = require('@libsql/client');
-  const db = createClient({ url: 'http://libsql:8080' });
+  const db = createClient({ url: 'http://libsql:8081' });
   db.execute('SELECT updated_at FROM tokens WHERE id = 1').then(r => console.log('Last updated:', r.rows[0]?.updated_at));
 "
 ```
@@ -529,6 +529,7 @@ docker compose exec mcpslackbot node -e "
 - `Error refreshing access token: {"error": "invalid_grant"}` - Refresh token expired/invalid
 - `Error loading tokens from database` - Database connection issue
 - Tokens revert after restart - Volume not persisting correctly
+- `address already in use` - Port 8081 is in use, check `docker ps` and stop conflicting container
 
 ## Troubleshooting
 
@@ -540,7 +541,8 @@ docker compose logs
 ```
 
 **Common issues:**
-- Port 3001 or 8080 already in use - change `PORT` in `.env`
+- Port 3001 already in use - change `PORT` in `.env`
+- Port 8081 already in use - change port mapping in `docker-compose.yml` for libsql service
 - Missing environment variables - verify `.env` file exists and is complete
 - Permission issues - ensure user can access Docker socket
 
@@ -549,12 +551,12 @@ docker compose logs
 **Verify libSQL is running:**
 ```bash
 docker compose ps libsql
-curl http://localhost:8080/health
+curl http://localhost:8081/health
 ```
 
 **Check network:**
 ```bash
-docker compose exec mcpslackbot ping -c 3 libsql
+docker compose exec mcpslackbot curl -f http://libsql:8081/health
 ```
 
 **Reset database:**
@@ -580,7 +582,7 @@ docker volume inspect mcp-slackbot_libsql-data
 ```bash
 docker compose exec mcpslackbot node -e "
   const { createClient } = require('@libsql/client');
-  const db = createClient({ url: 'http://libsql:8080' });
+  const db = createClient({ url: 'http://libsql:8081' });
   db.execute('SELECT COUNT(*) as count FROM tokens').then(r => console.log('Token count:', r.rows[0]?.count));
 "
 ```
@@ -596,6 +598,12 @@ docker compose exec mcpslackbot node tests/test_refresh.js
 ```bash
 docker compose exec mcpslackbot printenv TOKEN_ENDPOINT_URL
 # Should be: https://api.mycarrierpackets.com/token
+```
+
+**Check libSQL port:**
+```bash
+docker compose exec mcpslackbot printenv LIBSQL_URL
+# Should be: http://libsql:8081
 ```
 
 **Obtain fresh tokens:**
@@ -658,7 +666,7 @@ docker compose logs -f
 ```bash
 docker compose exec mcpslackbot node -e "
   const { createClient } = require('@libsql/client');
-  const db = createClient({ url: 'http://libsql:8080' });
+  const db = createClient({ url: 'http://libsql:8081' });
   db.execute('SELECT * FROM tokens').then(r => console.log(JSON.stringify(r.rows, null, 2)));
 "
 ```
