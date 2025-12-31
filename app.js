@@ -3,10 +3,9 @@ const axios = require('axios');
 const crypto = require('crypto');
 const rawBody = require('raw-body');
 const timingSafeCompare = require('tsscmp');
-const fs = require('fs');
-const path = require('path');
 const qs = require('qs');
 require('dotenv').config();
+const { initDb, getTokens, saveTokens } = require('./db');
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -50,6 +49,26 @@ if (!SLACK_SIGNING_SECRET) {
 if (!SLACK_WEBHOOK_URL) {
   console.error('SLACK_WEBHOOK_URL environment variable is required');
   process.exit(1);
+}
+
+// Load tokens from database on startup
+async function loadTokens() {
+  try {
+    await initDb();
+    const dbTokens = await getTokens();
+    if (dbTokens) {
+      console.log('Loaded tokens from database');
+      BEARER_TOKEN = dbTokens.bearerToken;
+      REFRESH_TOKEN = dbTokens.refreshToken;
+    } else {
+      // First run - save env tokens to database
+      console.log('No tokens in database, saving from environment');
+      await saveTokens(BEARER_TOKEN, REFRESH_TOKEN);
+    }
+  } catch (error) {
+    console.error('Error loading tokens from database:', error);
+    console.log('Falling back to environment variables');
+  }
 }
 
 // Raw body parsing for Slack signature verification
@@ -177,35 +196,13 @@ const verifyTestEndpointAuth = (req, res, next) => {
   });
 };
 
-// Helper function to update .env file
-const envFilePath = path.resolve(__dirname, '.env');
-function updateEnvFile(updatedValues) {
-  try {
-    let envContent = fs.readFileSync(envFilePath, 'utf8');
-    Object.entries(updatedValues).forEach(([key, value]) => {
-      const regex = new RegExp(`^${key}=.*$`, 'm');
-      if (envContent.match(regex)) {
-        envContent = envContent.replace(regex, `${key}=${value}`);
-      } else {
-        envContent += `\n${key}=${value}`;
-      }
-    });
-    fs.writeFileSync(envFilePath, envContent);
-    console.log('.env file updated successfully.');
-  } catch (err) {
-    console.error('Error writing to .env file:', err);
-  }
-}
-
 // Function to refresh the access token
 async function refreshAccessToken() {
   console.log('Attempting to refresh access token...');
   try {
     const data = qs.stringify({
       grant_type: 'refresh_token',
-      refresh_token: REFRESH_TOKEN,
-      client_id: CLIENT_ID,
-      client_secret: CLIENT_SECRET
+      refresh_token: REFRESH_TOKEN
     });
 
     const response = await axios.post(TOKEN_ENDPOINT_URL, data, {
@@ -223,20 +220,18 @@ async function refreshAccessToken() {
 
     console.log('Access token refreshed successfully.');
     BEARER_TOKEN = newAccessToken;
-    process.env.BEARER_TOKEN = newAccessToken;
-    updateEnvFile({ BEARER_TOKEN: newAccessToken });
 
     let newRefreshIssued = false;
     if (newRefreshToken) {
       console.log('New refresh token received.');
       REFRESH_TOKEN = newRefreshToken;
-      process.env.REFRESH_TOKEN = newRefreshToken;
-      updateEnvFile({ REFRESH_TOKEN: newRefreshToken });
       newRefreshIssued = true;
     } else {
       console.warn('New refresh token was not provided in the response. Old refresh token will be reused.');
-      newRefreshIssued = false;
     }
+
+    // Save tokens to database
+    await saveTokens(BEARER_TOKEN, REFRESH_TOKEN);
 
     return { success: true, newRefreshIssued };
   } catch (error) {
@@ -485,6 +480,15 @@ app.get('/test/refresh', verifyTestEndpointAuth, async (req, res) => {
   }
 });
 
-app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
+// Start server with database initialization
+async function startServer() {
+  await loadTokens();
+  app.listen(port, () => {
+    console.log(`Server is running on port ${port}`);
+  });
+}
+
+startServer().catch(err => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
 });
