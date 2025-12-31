@@ -70,7 +70,7 @@ LIBSQL_URL=http://libsql:8080
 
 **Production mode:**
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 This command will:
@@ -81,14 +81,14 @@ This command will:
 
 **Development mode (with logs visible):**
 ```bash
-docker-compose up
+docker compose up
 ```
 
 ### 4. Verify deployment
 
 Check that both containers are running:
 ```bash
-docker-compose ps
+docker compose ps
 ```
 
 Expected output:
@@ -101,13 +101,13 @@ mcpslackbot         mcpslackbot                              Up
 View application logs:
 ```bash
 # All logs
-docker-compose logs -f
+docker compose logs -f
 
 # Just the app
-docker-compose logs -f mcpslackbot
+docker compose logs -f mcpslackbot
 
 # Just the database
-docker-compose logs -f libsql
+docker compose logs -f libsql
 ```
 
 Look for these startup messages:
@@ -118,7 +118,7 @@ Look for these startup messages:
 ### 5. Test token refresh functionality
 
 ```bash
-docker-compose exec mcpslackbot node tests/test_refresh.js
+docker compose exec mcpslackbot node tests/test_refresh.js
 ```
 
 Expected output:
@@ -164,7 +164,7 @@ Expected response:
 
 **View current tokens:**
 ```bash
-docker-compose exec mcpslackbot node -e "
+docker compose exec mcpslackbot node -e "
   const { createClient } = require('@libsql/client');
   const db = createClient({ url: 'http://libsql:8080' });
   db.execute('SELECT bearer_token, refresh_token, updated_at FROM tokens').then(r => console.log(r.rows));
@@ -173,7 +173,7 @@ docker-compose exec mcpslackbot node -e "
 
 **Manually update tokens in database:**
 ```bash
-docker-compose exec mcpslackbot node -e "
+docker compose exec mcpslackbot node -e "
   const { saveTokens } = require('./db');
   saveTokens('new_bearer_token', 'new_refresh_token').then(() => console.log('Done'));
 "
@@ -182,22 +182,22 @@ docker-compose exec mcpslackbot node -e "
 **Backup database:**
 ```bash
 # Stop containers first
-docker-compose down
+docker compose down
 
 # Copy the volume data
 docker run --rm -v mcp-slackbot_libsql-data:/data -v $(pwd):/backup alpine \
   tar czf /backup/libsql-backup-$(date +%Y%m%d).tar.gz -C /data .
 
 # Restart containers
-docker-compose up -d
+docker compose up -d
 ```
 
 **Restore database:**
 ```bash
-docker-compose down
+docker compose down
 docker run --rm -v mcp-slackbot_libsql-data:/data -v $(pwd):/backup alpine \
   tar xzf /backup/libsql-backup-YYYYMMDD.tar.gz -C /data
-docker-compose up -d
+docker compose up -d
 ```
 
 ## Deployment with GitHub Actions
@@ -236,7 +236,7 @@ The workflow triggers on:
 1. Checkout code from specified branch
 2. Stop existing containers
 3. Create `.env` file from GitHub Secrets
-4. Start containers with `docker-compose up -d --build`
+4. Start containers with `docker compose up -d --build`
 5. Wait for containers to start (15 seconds)
 6. Verify health endpoint responds
 7. Test refresh token functionality
@@ -275,8 +275,8 @@ If you're starting fresh or need to reset tokens:
 
 3. Restart containers:
    ```bash
-   docker-compose down
-   docker-compose up -d
+   docker compose down
+   docker compose up -d
    ```
 
 ### Scenario 2: Rotating Tokens in Production
@@ -285,7 +285,7 @@ Tokens are automatically rotated! You don't need to manually update them.
 
 If you ever need to force a refresh:
 ```bash
-docker-compose exec mcpslackbot node tests/test_refresh.js
+docker compose exec mcpslackbot node tests/test_refresh.js
 ```
 
 ### Scenario 3: Token Corruption or Loss
@@ -295,7 +295,7 @@ If the database becomes corrupted:
 1. Get fresh tokens (see Scenario 1)
 2. Stop containers:
    ```bash
-   docker-compose down
+   docker compose down
    ```
 3. Remove the volume:
    ```bash
@@ -304,7 +304,7 @@ If the database becomes corrupted:
 4. Update `.env` with fresh tokens
 5. Start containers:
    ```bash
-   docker-compose up -d
+   docker compose up -d
    ```
 
 The database will be recreated and seeded with the new tokens.
@@ -428,7 +428,7 @@ npm run test:refresh
 
 **Quick test:**
 ```bash
-docker-compose exec mcpslackbot node tests/test_refresh.js
+docker compose exec mcpslackbot node tests/test_refresh.js
 ```
 
 **Expected success output:**
@@ -461,16 +461,16 @@ Verify tokens persist across restarts:
 
 ```bash
 # Restart the app container (database stays running)
-docker-compose restart mcpslackbot
+docker compose restart mcpslackbot
 
 # Wait for startup
 sleep 5
 
 # Check logs - should show "Loaded tokens from database"
-docker-compose logs mcpslackbot | grep -i token
+docker compose logs mcpslackbot | grep -i token
 
 # Verify tokens still work
-docker-compose exec mcpslackbot node tests/test_refresh.js
+docker compose exec mcpslackbot node tests/test_refresh.js
 ```
 
 ### Real-World Scenario Testing
@@ -481,7 +481,7 @@ Test automatic token refresh when access token expires:
 2. Trigger a Slack command: `/mcp MC123456`
 3. Watch logs for automatic refresh:
    ```bash
-   docker-compose logs -f mcpslackbot
+   docker compose logs -f mcpslackbot
    ```
 
 Expected log sequence:
@@ -502,10 +502,10 @@ Sending Slack response for MC number: mc123456
 
 ```bash
 # Watch for refresh activity
-docker-compose logs -f mcpslackbot | grep -i -E "(refresh|token|401)"
+docker compose logs -f mcpslackbot | grep -i -E "(refresh|token|401)"
 
 # Check database last update time
-docker-compose exec mcpslackbot node -e "
+docker compose exec mcpslackbot node -e "
   const { createClient } = require('@libsql/client');
   const db = createClient({ url: 'http://libsql:8080' });
   db.execute('SELECT updated_at FROM tokens WHERE id = 1').then(r => console.log('Last updated:', r.rows[0]?.updated_at));
@@ -536,7 +536,7 @@ docker-compose exec mcpslackbot node -e "
 
 **Check logs:**
 ```bash
-docker-compose logs
+docker compose logs
 ```
 
 **Common issues:**
@@ -548,20 +548,20 @@ docker-compose logs
 
 **Verify libSQL is running:**
 ```bash
-docker-compose ps libsql
+docker compose ps libsql
 curl http://localhost:8080/health
 ```
 
 **Check network:**
 ```bash
-docker-compose exec mcpslackbot ping -c 3 libsql
+docker compose exec mcpslackbot ping -c 3 libsql
 ```
 
 **Reset database:**
 ```bash
-docker-compose down
+docker compose down
 docker volume rm mcp-slackbot_libsql-data
-docker-compose up -d
+docker compose up -d
 ```
 
 ### Tokens not persisting
@@ -578,7 +578,7 @@ docker volume inspect mcp-slackbot_libsql-data
 
 **Verify database has data:**
 ```bash
-docker-compose exec mcpslackbot node -e "
+docker compose exec mcpslackbot node -e "
   const { createClient } = require('@libsql/client');
   const db = createClient({ url: 'http://libsql:8080' });
   db.execute('SELECT COUNT(*) as count FROM tokens').then(r => console.log('Token count:', r.rows[0]?.count));
@@ -589,12 +589,12 @@ docker-compose exec mcpslackbot node -e "
 
 **Get detailed error:**
 ```bash
-docker-compose exec mcpslackbot node tests/test_refresh.js
+docker compose exec mcpslackbot node tests/test_refresh.js
 ```
 
 **Check token endpoint URL:**
 ```bash
-docker-compose exec mcpslackbot printenv TOKEN_ENDPOINT_URL
+docker compose exec mcpslackbot printenv TOKEN_ENDPOINT_URL
 # Should be: https://api.mycarrierpackets.com/token
 ```
 
@@ -616,7 +616,7 @@ Then update tokens in database (see "Updating Tokens" section).
 
 **Check signature verification:**
 ```bash
-docker-compose logs mcpslackbot | grep -i signature
+docker compose logs mcpslackbot | grep -i signature
 ```
 
 **Test health endpoint externally:**
@@ -627,7 +627,7 @@ curl https://your-public-url.com/health
 ## Security Best Practices
 
 - ✅ **Never commit `.env` files** - Already in `.gitignore`
-- ✅ **Use Docker secrets in production** - Configured in `docker-compose.yml`
+- ✅ **Use Docker secrets in production** - Configured in `docker compose.yml`
 - ✅ **Rotate credentials regularly** - Automatic for access/refresh tokens
 - ✅ **Use HTTPS for public endpoints** - Required by Slack
 - ✅ **Restrict test endpoints** - `/test/refresh` disabled in production
@@ -645,18 +645,18 @@ curl https://your-public-url.com/health
 git pull origin main
 
 # Rebuild and restart
-docker-compose down
-docker-compose up -d --build
+docker compose down
+docker compose up -d --build
 
 # Verify
-docker-compose logs -f
+docker compose logs -f
 ```
 
 ### Database Maintenance
 
 **View database statistics:**
 ```bash
-docker-compose exec mcpslackbot node -e "
+docker compose exec mcpslackbot node -e "
   const { createClient } = require('@libsql/client');
   const db = createClient({ url: 'http://libsql:8080' });
   db.execute('SELECT * FROM tokens').then(r => console.log(JSON.stringify(r.rows, null, 2)));
@@ -671,7 +671,7 @@ Create a cron job:
 crontab -e
 
 # Add daily backup at 2 AM
-0 2 * * * cd /path/to/mcp-slackbot && docker-compose down && docker run --rm -v mcp-slackbot_libsql-data:/data -v $(pwd)/backups:/backup alpine tar czf /backup/libsql-$(date +\%Y\%m\%d).tar.gz -C /data . && docker-compose up -d
+0 2 * * * cd /path/to/mcp-slackbot && docker compose down && docker run --rm -v mcp-slackbot_libsql-data:/data -v $(pwd)/backups:/backup alpine tar czf /backup/libsql-$(date +\%Y\%m\%d).tar.gz -C /data . && docker compose up -d
 ```
 
 ## License
