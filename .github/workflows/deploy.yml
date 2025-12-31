@@ -57,7 +57,7 @@ jobs:
         cat > .env << EOF
         NODE_ENV=production
         PORT=3001
-        LIBSQL_URL=http://libsql:8080
+        LIBSQL_URL=http://libsql:8081
         BEARER_TOKEN=${{ secrets.BEARER_TOKEN }}
         REFRESH_TOKEN=${{ secrets.REFRESH_TOKEN }}
         TOKEN_ENDPOINT_URL=${{ secrets.TOKEN_ENDPOINT_URL }}
