@@ -101,6 +101,7 @@ function getRiskLevel(points) {
 }
 
 // Helper function to format infraction details
+// eslint-disable-next-line no-unused-vars
 function formatInfractions(infractions) {
   if (!infractions || infractions.length === 0) {
     return "No infractions found.";
