@@ -47,7 +47,7 @@ jobs:
     - name: Stop existing containers
       run: |
         echo "Stopping existing containers..."
-        docker-compose down || true
+        docker compose down || true
       continue-on-error: true
 
     # Step 4: Create .env file with secrets
@@ -67,11 +67,11 @@ jobs:
         SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}
         EOF
 
-    # Step 5: Build and start containers with docker-compose
+    # Step 5: Build and start containers with docker compose
     - name: Start containers
       run: |
-        echo "Starting containers with docker-compose..."
-        docker-compose up -d --build
+        echo "Starting containers with docker compose..."
+        docker compose up -d --build
 
     # Step 6: Wait and verify deployment
     - name: Verify deployment
@@ -79,9 +79,9 @@ jobs:
         echo "Waiting for containers to start..."
         sleep 15
 
-        if docker-compose ps | grep -q "Up"; then
+        if docker compose ps | grep -q "Up\|running"; then
           echo "✅ Containers are running!"
-          docker-compose ps
+          docker compose ps
 
           # Test the health endpoint
           echo "Testing health endpoint..."
@@ -89,12 +89,12 @@ jobs:
             echo "✅ Health check passed!"
           else
             echo "❌ Health check failed!"
-            docker-compose logs
+            docker compose logs
             exit 1
           fi
         else
           echo "❌ Containers failed to start!"
-          docker-compose logs
+          docker compose logs
           exit 1
         fi
 
@@ -102,11 +102,11 @@ jobs:
     - name: Test refresh token
       run: |
         echo "Testing refresh token functionality..."
-        if docker-compose exec -T mcpslackbot node tests/test_refresh.js; then
+        if docker compose exec -T mcpslackbot node tests/test_refresh.js; then
           echo "✅ Refresh token test passed!"
         else
           echo "❌ Refresh token test failed!"
-          docker-compose logs
+          docker compose logs
           exit 1
         fi
 
