@@ -4,16 +4,16 @@
   "description": "linehaul.ai open-source app to execute Carrier Risk Assessments, with the MyCarrierPortal API, from within your Slack environment.",
   "main": "app.js",
   "scripts": {
-    "start": "node app.js",
-    "dev": "nodemon app.js",
-    "pm2:start": "pm2 start app.js --name mcp-slackbot",
+    "start": "bun app.js",
+    "dev": "bun --watch app.js",
+    "pm2:start": "pm2 start app.js --interpreter bun --name mcp-slackbot",
     "pm2:stop": "pm2 stop mcp-slackbot",
     "pm2:restart": "pm2 restart mcp-slackbot",
     "pm2:logs": "pm2 logs mcp-slackbot",
     "pm2:status": "pm2 status",
-    "test": "node tests/test_preview.js && node tests/test_refresh.js && node tests/test_token.js",
-    "test:token": "node tests/test_token.js",
-    "test:refresh": "node tests/test_refresh.js",
+    "test": "bun tests/test_preview.js && bun tests/test_refresh.js && bun tests/test_token.js",
+    "test:token": "bun tests/test_token.js",
+    "test:refresh": "bun tests/test_refresh.js",
     "lint": "eslint .",
     "lint:fix": "eslint --fix ."
   },
@@ -36,8 +36,7 @@
   "devDependencies": {
     "@eslint/js": "^9.27.0",
     "eslint": "^9.27.0",
-    "globals": "^16.2.0",
-    "nodemon": "^3.0.3"
+    "globals": "^16.2.0"
   },
   "keywords": [
     "slack",
@@ -48,6 +47,6 @@
   ],
   "author": "linehaul.ai",
   "engines": {
-    "node": ">=18.0.0"
+    "bun": ">=1.0.0"
   }
 }
