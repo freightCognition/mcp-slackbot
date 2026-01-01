@@ -20,7 +20,7 @@ This application uses a **dual-container architecture** with Docker Compose:
 - **mcpslackbot**: Node.js application serving Slack commands and API integration
 - **libsql**: Database server (Turso libSQL) for persistent token storage
 
-Token persistence ensures OAuth refresh tokens survive container restarts and enables automatic token rotation without manual intervention.
+Token persistence ensures OAuth refresh tokens survive container restarts and enables automatic token rotation without manual intervention. Slack connectivity is powered by the Bolt framework using Socket Mode, so no public HTTP endpoints are required. The `/mcp` command opens a modal for entering carrier details and posts results directly back to Slack.
 
 ## Quick Start with Docker Compose
 
@@ -50,8 +50,7 @@ CLIENT_SECRET=your_mcp_password
 
 # Slack Configuration
 SLACK_BOT_TOKEN=xoxb-your-slack-bot-token
-SLACK_SIGNING_SECRET=your_slack_signing_secret
-SLACK_WEBHOOK_URL=https://hooks.slack.com/services/your/webhook/url
+SLACK_APP_TOKEN=xapp-your-app-level-token
 
 # Application Configuration
 NODE_ENV=production
@@ -221,8 +220,8 @@ Navigate to **Settings > Secrets and variables > Actions** and add:
 | `TOKEN_ENDPOINT_URL` | MyCarrierPortal token endpoint | `https://api.mycarrierpackets.com/token` |
 | `CLIENT_ID` | MyCarrierPortal username | `your_username` |
 | `CLIENT_SECRET` | MyCarrierPortal password | `your_password` |
-| `SLACK_SIGNING_SECRET` | Slack app signing secret | `1234567890abcdef...` |
-| `SLACK_WEBHOOK_URL` | Slack incoming webhook URL | `https://hooks.slack.com/...` |
+| `SLACK_BOT_TOKEN` | Slack bot token for API calls | `xoxb-...` |
+| `SLACK_APP_TOKEN` | Slack app-level token for Socket Mode | `xapp-...` |
 
 **Note:** After the first deployment, tokens will be managed automatically via the database. GitHub Secrets only provide initial values.
 
@@ -356,22 +355,24 @@ To use this bot, you need to create a Slack App:
 2. Choose "From scratch"
 3. Name your app (e.g., "MCP Bot") and select your workspace
 
-### Slash Commands
+### Enable Socket Mode and App Token
+
+1. Navigate to **Settings > Socket Mode** and enable it
+2. Click **Generate Token and Scopes**, add the `connections:write` scope, and save
+3. Copy the generated App Token (starts with `xapp-`) to use as `SLACK_APP_TOKEN`
+
+### Slash Command and Modal
 
 1. Navigate to **Features > Slash Commands**
 2. Click **Create New Command**
 3. Configure:
    - **Command:** `/mcp`
-   - **Request URL:** `https://your-public-url.com/slack/commands`
+   - **Request URL:** Socket Mode does not require a public URL. You can supply a placeholder such as `https://example.com/socket-mode` to satisfy the form.
    - **Short Description:** "Fetch MCP Carrier Risk Assessment"
    - **Usage Hint:** `[MC number]`
 4. Save
 
-**For local development:** Use ngrok to create a public URL:
-```bash
-ngrok http 3001
-# Use the https URL provided by ngrok
-```
+Running `/mcp` opens a Slack modal that accepts the MC number and optional DOT number. Submitting the modal triggers the risk lookup and posts the results back to the originating channel (or a direct message if the channel cannot be resolved).
 
 ### Permissions (OAuth & Permissions)
 
@@ -382,12 +383,6 @@ ngrok http 3001
 3. Click **Install to Workspace**
 4. Copy the **Bot User OAuth Token** (starts with `xoxb-`) to use as `SLACK_BOT_TOKEN`
 
-### App Credentials
-
-1. Navigate to **Settings > Basic Information**
-2. Find **Signing Secret** under "App Credentials"
-3. Copy to use as `SLACK_SIGNING_SECRET`
-
 ## Environment Variables Reference
 
 | Variable | Required | Description | Example |
@@ -397,15 +392,12 @@ ngrok http 3001
 | `TOKEN_ENDPOINT_URL` | Yes | Token refresh endpoint | `https://api.mycarrierpackets.com/token` |
 | `CLIENT_ID` | Yes | MyCarrierPortal username | `your_username` |
 | `CLIENT_SECRET` | Yes | MyCarrierPortal password | `your_password` |
-| `SLACK_SIGNING_SECRET` | Yes | Slack app signing secret | `1234567890abcdef...` |
-| `SLACK_WEBHOOK_URL` | Yes | Slack incoming webhook URL | `https://hooks.slack.com/...` |
-| `SLACK_BOT_TOKEN` | No* | Slack bot token | `xoxb-...` |
+| `SLACK_BOT_TOKEN` | Yes | Slack bot token used for Bolt API calls | `xoxb-...` |
+| `SLACK_APP_TOKEN` | Yes | Slack app-level token for Socket Mode | `xapp-...` |
 | `NODE_ENV` | No | Environment mode | `production` or `development` |
 | `PORT` | No | Application port | `3001` (default) |
 | `LIBSQL_URL` | No | Database connection URL | `http://libsql:8081` (default) |
 | `TEST_API_KEY` | No | API key for test endpoints | `secure_random_string` |
-
-*Currently configured but not actively used by the application
 
 ## Testing
 
@@ -416,6 +408,9 @@ The project includes comprehensive test scripts for verifying functionality.
 ```bash
 # Run all tests
 npm test
+
+# Run formatting/unit checks that do not require external services
+npm run test:format
 
 # Test bearer token against API
 npm run test:token

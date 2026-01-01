@@ -11,7 +11,8 @@
     "pm2:restart": "pm2 restart mcp-slackbot",
     "pm2:logs": "pm2 logs mcp-slackbot",
     "pm2:status": "pm2 status",
-    "test": "node tests/test_preview.js && node tests/test_refresh.js && node tests/test_token.js",
+    "test": "node tests/format.test.js && node tests/test_preview.js && node tests/test_refresh.js && node tests/test_token.js",
+    "test:format": "node tests/format.test.js",
     "test:token": "node tests/test_token.js",
     "test:refresh": "node tests/test_refresh.js",
     "lint": "eslint .",
@@ -24,14 +25,11 @@
   "license": "MIT",
   "dependencies": {
     "@libsql/client": "^0.14.0",
+    "@slack/bolt": "^3.19.0",
     "axios": "^1.7.4",
-    "body-parser": "^1.20.2",
-    "crypto": "^1.0.1",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "pm2": "^5.3.1",
-    "raw-body": "^2.5.2",
-    "tsscmp": "^1.0.6"
+    "pm2": "^5.3.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.27.0",

@@ -1,57 +1,41 @@
-const express = require('express');
+const { App, LogLevel } = require('@slack/bolt');
 const axios = require('axios');
-const crypto = require('crypto');
-const rawBody = require('raw-body');
-const timingSafeCompare = require('tsscmp');
+const express = require('express');
 const qs = require('qs');
 require('dotenv').config();
-const { initDb, getTokens, saveTokens } = require('./db');
 
-const app = express();
+const { initDb, getTokens, saveTokens } = require('./db');
+const { buildRiskBlocks } = require('./lib/riskFormatter');
+
 const port = process.env.PORT || 3001;
 
-// Environment variables
 let BEARER_TOKEN = process.env.BEARER_TOKEN;
 let REFRESH_TOKEN = process.env.REFRESH_TOKEN;
 const TOKEN_ENDPOINT_URL = process.env.TOKEN_ENDPOINT_URL;
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
-const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET;
-const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
+const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
+const SLACK_APP_TOKEN = process.env.SLACK_APP_TOKEN;
 
-// Verify required environment variables
-if (!BEARER_TOKEN) {
-  console.error('BEARER_TOKEN environment variable is required');
-  process.exit(1);
-}
-if (!REFRESH_TOKEN) {
-  console.error('REFRESH_TOKEN environment variable is required');
-  process.exit(1);
-}
-if (!TOKEN_ENDPOINT_URL) {
-  console.error('TOKEN_ENDPOINT_URL environment variable is required');
-  process.exit(1);
-}
-if (!CLIENT_ID) {
-  console.error('CLIENT_ID environment variable is required');
-  process.exit(1);
-}
-if (!CLIENT_SECRET) {
-  console.error('CLIENT_SECRET environment variable is required');
+const requiredEnv = {
+  BEARER_TOKEN,
+  REFRESH_TOKEN,
+  TOKEN_ENDPOINT_URL,
+  CLIENT_ID,
+  CLIENT_SECRET,
+  SLACK_BOT_TOKEN,
+  SLACK_APP_TOKEN
+};
+
+const missingEnv = Object.entries(requiredEnv)
+  .filter(([_, value]) => !value)
+  .map(([key]) => key);
+
+if (missingEnv.length > 0) {
+  console.error(`Missing required environment variables: ${missingEnv.join(', ')}`);
   process.exit(1);
 }
 
-if (!SLACK_SIGNING_SECRET) {
-  console.error('SLACK_SIGNING_SECRET environment variable is required');
-  process.exit(1);
-}
-
-if (!SLACK_WEBHOOK_URL) {
-  console.error('SLACK_WEBHOOK_URL environment variable is required');
-  process.exit(1);
-}
-
-// Load tokens from database on startup
 async function loadTokens() {
   try {
     await initDb();
@@ -61,7 +45,6 @@ async function loadTokens() {
       BEARER_TOKEN = dbTokens.bearerToken;
       REFRESH_TOKEN = dbTokens.refreshToken;
     } else {
-      // First run - save env tokens to database
       console.log('No tokens in database, saving from environment');
       await saveTokens(BEARER_TOKEN, REFRESH_TOKEN);
     }
@@ -71,132 +54,6 @@ async function loadTokens() {
   }
 }
 
-// Raw body parsing for Slack signature verification
-app.use(express.json({
-  verify: (req, res, buf) => {
-    req.rawBody = buf;
-  }
-}));
-
-app.use(express.urlencoded({ 
-  extended: true,
-  verify: (req, res, buf) => {
-    req.rawBody = buf;
-  }
-}));
-
-function getRiskLevelEmoji(points) {
-  if (points >= 0 && points <= 124) {
-    return '🟢';
-  } else if (points >= 125 && points <= 249) {
-    return '🟡';
-  } else if (points >= 250 && points <= 999) {
-    return '🟠';
-  } else {
-    return '🔴';
-  }
-}
-
-function getRiskLevel(points) {
-  if (points >= 0 && points <= 124) {
-    return 'Low';
-  } else if (points >= 125 && points <= 249) {
-    return 'Medium';
-  } else if (points >= 250 && points <= 999) {
-    return 'Review Required';
-  } else {
-    return 'Fail';
-  }
-}
-
-// Helper function to format infraction details
-function formatInfractions(infractions) {
-  if (!infractions || infractions.length === 0) {
-    return "No infractions found.";
-  }
-  return infractions.map(infraction => {
-    return `- ${infraction.RuleText}: ${infraction.RuleOutput} (${infraction.Points} points)`;
-  }).join('\n');
-}
-
-// Middleware to verify Slack requests
-const verifySlackRequest = (req, res, next) => {
-  const signature = req.headers['x-slack-signature'];
-  const timestamp = req.headers['x-slack-request-timestamp'];
-
-  if (!signature || !timestamp) {
-    console.error('Missing required Slack headers');
-    return res.status(400).send('Missing required headers');
-  }
-
-  // Check for replay attacks
-  const fiveMinutesAgo = Math.floor(Date.now() / 1000) - 60 * 5;
-  if (timestamp < fiveMinutesAgo) {
-    console.error('Request is too old');
-    return res.status(400).send('Request is too old');
-  }
-
-  const sigBasestring = `v0:${timestamp}:${req.rawBody}`;
-  const mySignature = 'v0=' + 
-    crypto.createHmac('sha256', SLACK_SIGNING_SECRET)
-      .update(sigBasestring, 'utf8')
-      .digest('hex');
-
-  if (!timingSafeCompare(mySignature, signature)) {
-    console.error('Invalid signature');
-    return res.status(401).send('Invalid signature');
-  }
-
-  next();
-};
-
-// Middleware to verify test endpoint requests
-const verifyTestEndpointAuth = (req, res, next) => {
-  // Require an API key for test endpoints
-  const authHeader = req.headers['authorization'];
-  const apiKey = req.headers['x-api-key'];
-
-  // Check for either Bearer token or X-API-Key header
-  if (!authHeader && !apiKey) {
-    console.error('Missing authentication for test endpoint');
-    return res.status(401).json({
-      status: 'error',
-      message: 'Unauthorized: Missing authentication'
-    });
-  }
-
-  // Verify against a test API key from environment
-  const validApiKey = process.env.TEST_API_KEY;
-
-  if (!validApiKey) {
-    console.error('TEST_API_KEY not configured');
-    return res.status(503).json({
-      status: 'error',
-      message: 'Service unavailable: Authentication not configured'
-    });
-  }
-
-  // Check X-API-Key header
-  if (apiKey && timingSafeCompare(apiKey, validApiKey)) {
-    return next();
-  }
-
-  // Check Authorization: Bearer header
-  if (authHeader) {
-    const token = authHeader.replace('Bearer ', '');
-    if (timingSafeCompare(token, validApiKey)) {
-      return next();
-    }
-  }
-
-  console.error('Invalid authentication credentials for test endpoint');
-  return res.status(401).json({
-    status: 'error',
-    message: 'Unauthorized: Invalid credentials'
-  });
-};
-
-// Function to refresh the access token
 async function refreshAccessToken() {
   console.log('Attempting to refresh access token...');
   try {
@@ -230,7 +87,6 @@ async function refreshAccessToken() {
       console.warn('New refresh token was not provided in the response. Old refresh token will be reused.');
     }
 
-    // Save tokens to database
     await saveTokens(BEARER_TOKEN, REFRESH_TOKEN);
 
     return { success: true, newRefreshIssued };
@@ -243,14 +99,7 @@ async function refreshAccessToken() {
   }
 }
 
-app.post('/slack/commands', verifySlackRequest, async (req, res) => {
-  const { text, response_url } = req.body;
-
-  if (!text) {
-    return res.send('Please provide a valid MC number.');
-  }
-
-  const mcNumber = text.trim();
+async function fetchCarrierPreview(mcNumber, dotNumber) {
   let attempt = 0;
   const maxAttempts = 2;
 
@@ -261,7 +110,10 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
         'https://mycarrierpacketsapi-stage.azurewebsites.net/api/v1/Carrier/PreviewCarrier',
         null,
         {
-          params: { docketNumber: mcNumber },
+          params: {
+            docketNumber: mcNumber,
+            ...(dotNumber ? { DOTNumber: dotNumber } : {})
+          },
           headers: {
             Authorization: `Bearer ${BEARER_TOKEN}`,
             'Content-Type': 'application/json'
@@ -272,152 +124,12 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
 
       if (!apiResponse.data || apiResponse.data.length === 0) {
         console.log(`No data found for MC number: ${mcNumber}`);
-        return res.send('No data found for the provided MC number.');
+        throw new Error('No data found for the provided MC number.');
       }
 
       const data = apiResponse.data[0];
-      console.log(`Data received for MC number: ${mcNumber}`);
-
-      const blocks = [
-        {
-          type: "header",
-          text: {
-            type: "plain_text",
-            text: "MyCarrierPortal Risk Assessment",
-            emoji: true
-          }
-        },
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `*${data.CompanyName || 'N/A'}*\nDOT: ${data.DotNumber || 'N/A'} / MC: ${data.DocketNumber || 'N/A'}`
-          }
-        },
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `*Overall assessment:* ${getRiskLevelEmoji(data.RiskAssessmentDetails?.TotalPoints)} ${getRiskLevel(data.RiskAssessmentDetails?.TotalPoints)}`
-          }
-        },
-        {
-          type: "context",
-          elements: [
-            {
-              type: "mrkdwn",
-              text: `Total Points: ${data.RiskAssessmentDetails?.TotalPoints || 'N/A'}`
-            }
-          ]
-        },
-        {
-          type: "divider"
-        }
-      ];
-
-      const categories = ['Authority', 'Insurance', 'Operation', 'Safety', 'Other'];
-      categories.forEach(category => {
-        const categoryData = data.RiskAssessmentDetails?.[category];
-        if (categoryData) {
-          blocks.push(
-            {
-              type: "section",
-              text: {
-                type: "mrkdwn",
-                text: `*${category}:* ${getRiskLevelEmoji(categoryData.TotalPoints)} ${getRiskLevel(categoryData.TotalPoints)}`
-              }
-            },
-            {
-              type: "context",
-              elements: [
-                {
-                  type: "mrkdwn",
-                  text: `Risk Level: ${getRiskLevel(categoryData.TotalPoints)} | Points: ${categoryData.TotalPoints}\nInfractions:\n${formatInfractions(categoryData.Infractions)}`
-                }
-              ]
-            }
-          );
-        }
-      });
-
-      // Add MyCarrierProtect section
-      const mcpData = {
-        TotalPoints: (data.IsBlocked ? 1000 : 0) + (data.FreightValidateStatus === 'Review Recommended' ? 1000 : 0), 
-        OverallRating: getRiskLevel((data.IsBlocked ? 1000 : 0) + (data.FreightValidateStatus === 'Review Recommended' ? 1000 : 0)),
-        Infractions: [] 
-      };
-      if (data.IsBlocked) {
-        mcpData.Infractions.push({
-          Points: 1000,
-          RiskLevel: 'Review Required',
-          RuleText: 'MyCarrierProtect: Blocked',
-          RuleOutput: 'Carrier blocked by 3 or more companies'
-        });
-      }
-      if (data.FreightValidateStatus === 'Review Recommended') {
-        mcpData.Infractions.push({
-          Points: 1000,
-          RiskLevel: 'Review Required',
-          RuleText: 'FreightValidate Status',
-          RuleOutput: 'Carrier has a FreightValidate Review Recommended status'
-        });
-      }
-
-      if (mcpData.TotalPoints > 0) {
-        let mcpDetailsText = `Risk Level: ${mcpData.OverallRating} | Points: ${mcpData.TotalPoints}`;
-        mcpDetailsText += `\nInfractions:\n${formatInfractions(mcpData.Infractions)}`;
-        blocks.push(
-          {
-            type: "section",
-            text: {
-              type: "mrkdwn",
-              text: `*MyCarrierProtect:* ${getRiskLevelEmoji(mcpData.TotalPoints)} ${mcpData.OverallRating}`
-            }
-          },
-          {
-            type: "context",
-            elements: [
-              {
-                type: "mrkdwn",
-                text: mcpDetailsText
-              }
-            ]
-          },
-          {
-            type: "divider"
-          }
-        );
-      }
-
-      const slackResponse = {
-        response_type: 'in_channel',
-        blocks: blocks
-      };
-
-      console.log(`Sending Slack response for MC number: ${mcNumber}`);
-      
-      // Send immediate acknowledgment
-      res.send();
-
-      // Send detailed response via webhook
-      try {
-        await axios.post(SLACK_WEBHOOK_URL, slackResponse, { 
-          headers: { 'Content-Type': 'application/json' },
-          timeout: 5000 
-        });
-      } catch (webhookError) {
-        console.error('Error sending webhook response:', webhookError);
-        // Try fallback to response_url if webhook fails
-        if (response_url) {
-          try {
-            await axios.post(response_url, slackResponse, { timeout: 5000 });
-          } catch (fallbackError) {
-            console.error('Error sending fallback response:', fallbackError);
-          }
-        }
-      }
-
-      return;
+      const { blocks, summaryText } = buildRiskBlocks(data);
+      return { blocks, summaryText };
     } catch (error) {
       if (error.response && error.response.status === 401 && attempt < maxAttempts - 1) {
         console.log('Access token expired or invalid. Attempting refresh...');
@@ -425,70 +137,232 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
         if (refreshed.success) {
           console.log('Token refreshed. Retrying API call...');
           attempt++;
-        } else {
-          console.error('Failed to refresh token. Aborting.');
-          return res.send("Error: Could not refresh authentication. Please check logs or contact admin.");
+          continue;
         }
-      } else {
-        console.error('API call failed or max retries reached:', error.response ? JSON.stringify(error.response.data, null, 2) : error.message);
-        let userMessage = 'Error fetching data. Please try again later.';
-        if (error.response && error.response.status === 401) {
-            userMessage = 'Authentication failed even after attempting to refresh. Please contact an administrator.';
-        }
-        return res.send(userMessage);
+        console.error('Failed to refresh token. Aborting.');
+        throw new Error('Authentication failed after refresh attempt.');
       }
+
+      if (error.message === 'No data found for the provided MC number.') {
+        throw error;
+      }
+
+      console.error('API call failed or max retries reached:', error.response ? JSON.stringify(error.response.data, null, 2) : error.message);
+      throw new Error('Error fetching data. Please try again later.');
     }
-  } // end while loop
-});
-
-// Add basic health check endpoint
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'healthy' });
-});
-
-// Test endpoint for refresh token verification (for testing/debugging)
-app.get('/test/refresh', verifyTestEndpointAuth, async (req, res) => {
-  // Only allow in non-production environments
-  if (process.env.NODE_ENV === 'production') {
-    return res.status(404).json({ status: 'error', message: 'Not found' });
   }
 
+  throw new Error('Unable to fetch carrier data after multiple attempts.');
+}
+
+const boltApp = new App({
+  token: SLACK_BOT_TOKEN,
+  appToken: SLACK_APP_TOKEN,
+  socketMode: true,
+  logLevel: LogLevel.INFO
+});
+
+function buildModal(triggerChannelId, defaults = {}) {
+  return {
+    type: 'modal',
+    callback_id: 'mcp_carrier_modal',
+    private_metadata: JSON.stringify({ channel_id: triggerChannelId }),
+    title: {
+      type: 'plain_text',
+      text: 'MCP Lookup'
+    },
+    submit: {
+      type: 'plain_text',
+      text: 'Fetch'
+    },
+    close: {
+      type: 'plain_text',
+      text: 'Cancel'
+    },
+    blocks: [
+      {
+        type: 'input',
+        block_id: 'mc_block',
+        element: {
+          type: 'plain_text_input',
+          action_id: 'mc_input',
+          initial_value: defaults.mcNumber || '',
+          placeholder: {
+            type: 'plain_text',
+            text: 'e.g., 415186'
+          }
+        },
+        label: {
+          type: 'plain_text',
+          text: 'MC Number'
+        }
+      },
+      {
+        type: 'input',
+        optional: true,
+        block_id: 'dot_block',
+        element: {
+          type: 'plain_text_input',
+          action_id: 'dot_input',
+          initial_value: defaults.dotNumber || '',
+          placeholder: {
+            type: 'plain_text',
+            text: 'Optional DOT number'
+          }
+        },
+        label: {
+          type: 'plain_text',
+          text: 'DOT Number'
+        }
+      }
+    ]
+  };
+}
+
+boltApp.command('/mcp', async ({ ack, body, client }) => {
+  await ack();
+
   try {
-    console.log('Refresh token test endpoint called');
-    const result = await refreshAccessToken();
-    if (result.success) {
-      res.json({
-        status: 'success',
-        message: 'Token refreshed successfully',
-        timestamp: new Date().toISOString(),
-        hasNewRefreshToken: result.newRefreshIssued
-      });
-    } else {
-      res.status(500).json({
-        status: 'error',
-        message: 'Failed to refresh token. Check server logs for details.',
-        timestamp: new Date().toISOString()
-      });
-    }
+    await client.views.open({
+      trigger_id: body.trigger_id,
+      view: buildModal(body.channel_id)
+    });
   } catch (error) {
-    console.error('Error in refresh test endpoint:', error);
-    res.status(500).json({
-      status: 'error',
-      message: error.message,
-      timestamp: new Date().toISOString()
+    console.error('Error opening modal:', error);
+    await client.chat.postEphemeral({
+      channel: body.channel_id,
+      user: body.user_id,
+      text: 'Unable to open carrier lookup modal right now. Please try again later.'
     });
   }
 });
 
-// Start server with database initialization
-async function startServer() {
-  await loadTokens();
-  app.listen(port, () => {
-    console.log(`Server is running on port ${port}`);
+boltApp.view('mcp_carrier_modal', async ({ ack, body, view, client }) => {
+  const mcNumber = view.state.values.mc_block.mc_input.value?.trim();
+  const dotNumber = view.state.values.dot_block?.dot_input?.value?.trim();
+  const privateMetadata = view.private_metadata ? JSON.parse(view.private_metadata) : {};
+  const targetChannel = privateMetadata.channel_id;
+  const viewId = view.id;
+
+  if (!mcNumber) {
+    await ack({
+      response_action: 'errors',
+      errors: {
+        mc_block: 'MC number is required.'
+      }
+    });
+    return;
+  }
+
+  await ack({
+    response_action: 'update',
+    view: {
+      type: 'modal',
+      callback_id: 'mcp_carrier_modal_loading',
+      title: {
+        type: 'plain_text',
+        text: 'MCP Lookup'
+      },
+      close: {
+        type: 'plain_text',
+        text: 'Close'
+      },
+      blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `Looking up MC Number *${mcNumber}*...`
+          }
+        }
+      ]
+    }
   });
+
+  try {
+    const { blocks, summaryText } = await fetchCarrierPreview(mcNumber, dotNumber);
+
+    let channelId = targetChannel;
+    if (!channelId) {
+      const conversation = await client.conversations.open({ users: body.user.id });
+      channelId = conversation.channel.id;
+    }
+
+    await client.chat.postMessage({
+      channel: channelId,
+      text: summaryText,
+      blocks
+    });
+
+    await client.views.update({
+      view_id: viewId,
+      view: {
+        type: 'modal',
+        callback_id: 'mcp_carrier_modal_success',
+        title: {
+          type: 'plain_text',
+          text: 'MCP Lookup'
+        },
+        close: {
+          type: 'plain_text',
+          text: 'Close'
+        },
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `Assessment posted to <#${channelId}>.`
+            }
+          }
+        ]
+      }
+    });
+  } catch (error) {
+    console.error('Error handling modal submission:', error);
+    const errorMessage = error.message || 'An unexpected error occurred.';
+    await client.views.update({
+      view_id: viewId,
+      view: {
+        type: 'modal',
+        callback_id: 'mcp_carrier_modal_error',
+        title: {
+          type: 'plain_text',
+          text: 'MCP Lookup'
+        },
+        close: {
+          type: 'plain_text',
+          text: 'Close'
+        },
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `*Error:* ${errorMessage}`
+            }
+          }
+        ]
+      }
+    });
+  }
+});
+
+const healthApp = express();
+healthApp.get('/health', (req, res) => {
+  res.status(200).json({ status: 'healthy' });
+});
+
+async function start() {
+  await loadTokens();
+  await boltApp.start();
+  healthApp.listen(port, () => {
+    console.log(`Health endpoint available on port ${port}`);
+  });
+  console.log('⚡️ MCP Slackbot is running in Socket Mode powered by Bolt.');
 }
 
-startServer().catch(err => {
-  console.error('Failed to start server:', err);
+start().catch(err => {
+  console.error('Failed to start application:', err);
   process.exit(1);
 });
