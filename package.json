@@ -31,7 +31,9 @@
     "express": "^4.19.2",
     "pm2": "^5.3.1",
     "raw-body": "^2.5.2",
-    "tsscmp": "^1.0.6"
+    "tsscmp": "^1.0.6",
+    "uuid": "^13.0.0",
+    "winston": "^3.19.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.27.0",
