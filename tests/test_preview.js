@@ -100,16 +100,6 @@ function getRiskLevel(points) {
   }
 }
 
-// Helper function to format infraction details
-function formatInfractions(infractions) {
-  if (!infractions || infractions.length === 0) {
-    return "No infractions found.";
-  }
-  return infractions.map(infraction => {
-    return `- ${infraction.RuleText}: ${infraction.RuleOutput} (${infraction.Points} points)`;
-  }).join('\n');
-}
-
 // Function to preview carrier
 async function previewCarrier(mcNumber, dotNumber = '976560') {
   let attempt = 0;
