@@ -166,13 +166,14 @@ const verifySlackRequest = (req, res, next) => {
 
   // Check for replay attacks
   const fiveMinutesAgo = Math.floor(Date.now() / 1000) - 60 * 5;
-  if (timestamp < fiveMinutesAgo) {
+  const requestTimestamp = parseInt(timestamp, 10);
+  if (isNaN(requestTimestamp) || requestTimestamp < fiveMinutesAgo) {
     logger.warn({
       requestId: req.id,
       method: req.method,
       url: req.originalUrl
     }, 'Request is too old');
-    return res.status(400).send('Request is too old');
+    return res.status(400).send(isNaN(requestTimestamp) ? 'Invalid timestamp' : 'Request is too old');
   }
 
   const sigBasestring = `v0:${timestamp}:${req.rawBody}`;
