@@ -183,7 +183,25 @@ const verifyTestEndpointAuth = (req, res, next) => {
 
   // Check Authorization: Bearer header
   if (authHeader) {
-    const token = authHeader.replace('Bearer ', '');
+    // Verify the header has the correct Bearer scheme (case-insensitive)
+    const bearerMatch = authHeader.match(/^Bearer\s+(.+)$/i);
+    if (!bearerMatch) {
+      console.error('Malformed Authorization header: missing or invalid Bearer scheme');
+      return res.status(401).json({
+        status: 'error',
+        message: 'Unauthorized: Malformed Authorization header'
+      });
+    }
+
+    const token = bearerMatch[1].trim();
+    if (!token) {
+      console.error('Malformed Authorization header: missing token after Bearer scheme');
+      return res.status(401).json({
+        status: 'error',
+        message: 'Unauthorized: Missing token'
+      });
+    }
+
     if (timingSafeCompare(token, validApiKey)) {
       return next();
     }
