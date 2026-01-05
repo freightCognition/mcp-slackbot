@@ -24,7 +24,7 @@ async function loadTokens() {
       console.log('Loaded tokens from database');
     }
   } catch (error) {
-    console.log('Could not load from database, using environment variables');
+    console.log('Could not load from database, using environment variables', error);
   }
 }
 
