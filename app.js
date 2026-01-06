@@ -557,7 +557,6 @@ app.get('/test/refresh', verifyTestEndpointAuth, async (req, res) => {
 });
 
 app.use((err, req, res, _next) => {
-app.use((err, req, res, _next) => {
   logger.error({
     err,
     request: {
