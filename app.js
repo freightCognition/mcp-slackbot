@@ -275,7 +275,8 @@ async function refreshAccessToken() {
     const response = await axios.post(TOKEN_ENDPOINT_URL, data, {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded'
-      }
+      },
+      timeout: 10000
     });
 
     const newAccessToken = response.data.access_token;
