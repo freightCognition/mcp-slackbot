@@ -83,3 +83,9 @@ postman/
 *postman/
 postman/*.json
 postman/**/*.json
+
+
+.auto-claude/
+
+docs/
+thoughts/
