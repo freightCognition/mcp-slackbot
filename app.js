@@ -472,20 +472,36 @@ app.post('/slack/commands', verifySlackRequest, asyncHandler(async (req, res) =>
       res.send();
 
       // Send detailed response via webhook
+      let deliverySucceeded = false;
+
       try {
-        await axios.post(SLACK_WEBHOOK_URL, slackResponse, { 
+        await axios.post(SLACK_WEBHOOK_URL, slackResponse, {
           headers: { 'Content-Type': 'application/json' },
-          timeout: 5000 
+          timeout: 5000
         });
+        deliverySucceeded = true;
       } catch (webhookError) {
         logger.error({ err: webhookError, mcNumber }, 'Error sending webhook response');
         // Try fallback to response_url if webhook fails
         if (response_url) {
           try {
             await axios.post(response_url, slackResponse, { timeout: 5000 });
+            deliverySucceeded = true;
           } catch (fallbackError) {
             logger.error({ err: fallbackError, mcNumber }, 'Error sending fallback response');
           }
+        }
+      }
+
+      // If both webhook and fallback failed, notify user via response_url as last resort
+      if (!deliverySucceeded && response_url) {
+        try {
+          await axios.post(response_url, {
+            response_type: 'ephemeral',
+            text: `Error: Unable to deliver carrier assessment results for MC ${mcNumber}. Please try again or contact support.`
+          }, { timeout: 5000 });
+        } catch (lastResortError) {
+          logger.error({ err: lastResortError, mcNumber }, 'Failed to send error notification to user');
         }
       }
 
