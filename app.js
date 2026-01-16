@@ -556,7 +556,16 @@ app.get('/test/refresh', verifyTestEndpointAuth, async (req, res) => {
 });
 
 app.use((err, req, res, _next) => {
-app.use((err, req, res, _next) => {
+  logger.error({
+    err,
+    request: {
+      id: req.id,
+      method: req.method,
+      url: req.originalUrl
+    }
+  }, 'Unhandled application error');
+  res.status(500).json({ status: 'error', message: 'Internal server error' });
+});
   logger.error({
     err,
     request: {
