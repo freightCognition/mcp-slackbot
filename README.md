@@ -15,9 +15,9 @@ A Slack bot for executing Carrier Risk Assessments using the MyCarrierPortal API
 
 ## Architecture
 
-This application uses a **dual-container architecture** with Docker Compose:
+This application uses a **dual-container architecture** with Docker Compose and connects to Slack via **Bolt Socket Mode**:
 
-- **mcpslackbot**: Bun application serving Slack commands and API integration
+- **mcpslackbot**: Bun application running the Slack Bolt Socket Mode client and MyCarrierPortal API integration
 - **libsql**: Database server (Turso libSQL) for persistent token storage
 
 Token persistence ensures OAuth refresh tokens survive container restarts and enables automatic token rotation without manual intervention.
@@ -51,11 +51,10 @@ CLIENT_SECRET=your_mcp_password
 # Slack Configuration
 SLACK_BOT_TOKEN=xoxb-your-slack-bot-token
 SLACK_SIGNING_SECRET=your_slack_signing_secret
-SLACK_WEBHOOK_URL=https://hooks.slack.com/services/your/webhook/url
+SLACK_APP_TOKEN=xapp-your-slack-app-token
 
 # Application Configuration
 NODE_ENV=production
-PORT=3001
 
 # Database Configuration (optional - defaults shown)
 LIBSQL_URL=http://libsql:8081
@@ -113,7 +112,7 @@ docker compose logs -f libsql
 Look for these startup messages:
 - `Database initialized`
 - `Loaded tokens from database` OR `No tokens in database, saving from environment`
-- `Server is running on port 3001`
+- `Slack Bolt app is running in Socket Mode`
 
 ### 5. Test token refresh functionality
 
@@ -133,17 +132,6 @@ Access token refreshed successfully.
 New refresh token received.
 Tokens saved to database
 Test successful!
-```
-
-### 6. Health check
-
-```bash
-curl http://localhost:3001/health
-```
-
-Expected response:
-```json
-{"status":"healthy"}
 ```
 
 ## Token Persistence & Rotation
@@ -222,7 +210,8 @@ Navigate to **Settings > Secrets and variables > Actions** and add:
 | `CLIENT_ID` | MyCarrierPortal username | `your_username` |
 | `CLIENT_SECRET` | MyCarrierPortal password | `your_password` |
 | `SLACK_SIGNING_SECRET` | Slack app signing secret | `1234567890abcdef...` |
-| `SLACK_WEBHOOK_URL` | Slack incoming webhook URL | `https://hooks.slack.com/...` |
+| `SLACK_BOT_TOKEN` | Slack bot token | `xoxb-...` |
+| `SLACK_APP_TOKEN` | Slack app-level token (Socket Mode) | `xapp-...` |
 
 **Note:** After the first deployment, tokens will be managed automatically via the database. GitHub Secrets only provide initial values.
 
@@ -238,9 +227,8 @@ The workflow triggers on:
 3. Create `.env` file from GitHub Secrets
 4. Start containers with `docker compose up -d --build`
 5. Wait for containers to start (15 seconds)
-6. Verify health endpoint responds
-7. Test refresh token functionality
-8. Clean up `.env` file (for security)
+6. Test refresh token functionality
+7. Clean up `.env` file (for security)
 
 **View deployment logs:**
 - Go to **Actions** tab in GitHub
@@ -361,16 +349,19 @@ To use this bot, you need to create a Slack App:
 2. Click **Create New Command**
 3. Configure:
    - **Command:** `/mcp`
-   - **Request URL:** `https://your-public-url.com/slack/commands`
+   - **Request URL:** Use a placeholder URL (Socket Mode does not require a public endpoint)
    - **Short Description:** "Fetch MCP Carrier Risk Assessment"
    - **Usage Hint:** `[MC number]`
 4. Save
 
-**For local development:** Use ngrok to create a public URL:
-```bash
-ngrok http 3001
-# Use the https URL provided by ngrok
-```
+Socket Mode eliminates the need for a public HTTP endpoint or ngrok.
+
+### Socket Mode
+
+1. Navigate to **Settings > Socket Mode**
+2. Enable **Socket Mode**
+3. Generate an **App-Level Token** with the `connections:write` scope
+4. Copy the token to use as `SLACK_APP_TOKEN`
 
 ### Permissions (OAuth & Permissions)
 
@@ -397,14 +388,10 @@ ngrok http 3001
 | `CLIENT_ID` | Yes | MyCarrierPortal username | `your_username` |
 | `CLIENT_SECRET` | Yes | MyCarrierPortal password | `your_password` |
 | `SLACK_SIGNING_SECRET` | Yes | Slack app signing secret | `1234567890abcdef...` |
-| `SLACK_WEBHOOK_URL` | Yes | Slack incoming webhook URL | `https://hooks.slack.com/...` |
-| `SLACK_BOT_TOKEN` | No* | Slack bot token | `xoxb-...` |
+| `SLACK_BOT_TOKEN` | Yes | Slack bot token | `xoxb-...` |
+| `SLACK_APP_TOKEN` | Yes | Slack app-level token (Socket Mode) | `xapp-...` |
 | `NODE_ENV` | No | Environment mode | `production` or `development` |
-| `PORT` | No | Application port | `3001` (default) |
 | `LIBSQL_URL` | No | Database connection URL | `http://libsql:8081` (default) |
-| `TEST_API_KEY` | No | API key for test endpoints | `secure_random_string` |
-
-*Currently configured but not actively used by the application
 
 ## Testing
 
@@ -516,7 +503,6 @@ docker compose exec mcpslackbot node -e "
 ✅ **Everything working correctly:**
 - Database initializes on startup
 - Tokens loaded from database (not environment)
-- Health endpoint responds
 - Refresh test passes
 - Slack commands work
 - 401 errors trigger automatic refresh
@@ -540,7 +526,6 @@ docker compose logs
 ```
 
 **Common issues:**
-- Port 3001 already in use - change `PORT` in `.env`
 - Port 8081 already in use - change port mapping in `docker-compose.yml` for libsql service
 - Missing environment variables - verify `.env` file exists and is complete
 - Permission issues - ensure user can access Docker socket
@@ -617,27 +602,16 @@ Then update tokens in database (see "Updating Tokens" section).
 ### Slack commands not working
 
 **Verify Slack configuration:**
-1. Request URL must be publicly accessible
-2. Signing secret must match
-3. Bot has required scopes
-
-**Check signature verification:**
-```bash
-docker compose logs mcpslackbot | grep -i signature
-```
-
-**Test health endpoint externally:**
-```bash
-curl https://your-public-url.com/health
-```
+1. Socket Mode is enabled for the app
+2. `SLACK_APP_TOKEN` uses an app-level token with `connections:write`
+3. Signing secret matches
+4. Bot token has required scopes (`commands`, `chat:write`)
 
 ## Security Best Practices
 
 - ✅ **Never commit `.env` files** - Already in `.gitignore`
 - ✅ **Use Docker secrets in production** - Configured in `docker compose.yml`
 - ✅ **Rotate credentials regularly** - Automatic for access/refresh tokens
-- ✅ **Use HTTPS for public endpoints** - Required by Slack
-- ✅ **Restrict test endpoints** - `/test/refresh` disabled in production
 - ✅ **Backup database regularly** - Contains sensitive tokens
 - ✅ **Use `.env.example`** - Never contains real credentials
 - ✅ **Implement volume encryption** - Consider for libsql-data volume
