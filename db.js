@@ -1,4 +1,5 @@
 const { createClient } = require('@libsql/client');
+const logger = require('./logger');
 
 const db = createClient({
   url: process.env.LIBSQL_URL || 'http://localhost:8081'
@@ -14,7 +15,7 @@ async function initDb() {
       updated_at TEXT DEFAULT (datetime('now'))
     )
   `);
-  console.log('Database initialized');
+  logger.info('Database initialized');
 }
 
 // Get current tokens
@@ -40,7 +41,7 @@ async function saveTokens(bearerToken, refreshToken) {
             updated_at = datetime('now')`,
     args: [bearerToken, refreshToken]
   });
-  console.log('Tokens saved to database');
+  logger.info('Tokens saved to database');
 }
 
 module.exports = { db, initDb, getTokens, saveTokens };
