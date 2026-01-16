@@ -6,7 +6,7 @@ const { createClient } = require('@libsql/client');
 
 // Database connection
 const db = createClient({
-  url: process.env.LIBSQL_URL || 'http://localhost:8080'
+  url: process.env.LIBSQL_URL || 'http://localhost:8081'
 });
 
 // Environment variables (fallback)
@@ -28,18 +28,22 @@ async function loadTokens() {
   }
 }
 
-// Save tokens to database
+// Save tokens to database (optional - warns if database unavailable)
 async function saveTokens(bearerToken, refreshToken) {
-  await db.execute({
-    sql: `INSERT INTO tokens (id, bearer_token, refresh_token, updated_at)
-          VALUES (1, ?, ?, datetime('now'))
-          ON CONFLICT(id) DO UPDATE SET
-            bearer_token = excluded.bearer_token,
-            refresh_token = excluded.refresh_token,
-            updated_at = datetime('now')`,
-    args: [bearerToken, refreshToken]
-  });
-  console.log('Tokens saved to database');
+  try {
+    await db.execute({
+      sql: `INSERT INTO tokens (id, bearer_token, refresh_token, updated_at)
+            VALUES (1, ?, ?, datetime('now'))
+            ON CONFLICT(id) DO UPDATE SET
+              bearer_token = excluded.bearer_token,
+              refresh_token = excluded.refresh_token,
+              updated_at = datetime('now')`,
+      args: [bearerToken, refreshToken]
+    });
+    console.log('Tokens saved to database');
+  } catch (error) {
+    console.log('Warning: Could not save to database (libsql not available) - tokens only in memory');
+  }
 }
 
 // Function to refresh the access token
