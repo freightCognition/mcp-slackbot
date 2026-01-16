@@ -4,7 +4,7 @@
 This repository contains the `mcp-slackbot`, a Node.js application that integrates MyCarrierPortal (MCP) Carrier Risk Assessments into Slack using slash commands. It uses OAuth 2.0 for MCP authentication and stores tokens in a libSQL database to ensure persistence and rotation.
 
 ## Tech Stack
-- **Runtime**: Node.js (>= 18.0.0)
+- **Runtime**: Bun (>= 1.0.0)
 - **Framework**: Express
 - **Database**: libSQL (Turso)
 - **Containerization**: Docker & Docker Compose
@@ -30,18 +30,18 @@ The following environment variables are required for the application to function
 
 ### Installation
 ```bash
-npm install
+bun install
 ```
 
 ### Running the Application
-- **Standard**: `npm start` (or `node app.js`)
-- **Development**: `npm run dev` (uses nodemon)
+- **Standard**: `bun start` (or `bun app.js`)
+- **Development**: `bun run dev` (uses nodemon)
 - **Docker**: `docker compose up`
 
 ### Testing
-- **Run all tests**: `npm test`
-- **Test Token**: `npm run test:token`
-- **Test Refresh**: `npm run test:refresh`
+- **Run all tests**: `bun test`
+- **Test Token**: `bun run test:token`
+- **Test Refresh**: `bun run test:refresh`
 
 **Note**: Integration tests in `tests/` require valid API credentials in the `.env` file or environment variables.
 
@@ -58,7 +58,7 @@ npm install
 
 ## Instructions for Agents
 1.  **Plan First**: Always create a plan using `set_plan` before making changes.
-2.  **Verify**: Always verify your changes using `read_file`, `list_files`, or running tests (`npm test`).
+2.  **Verify**: Always verify your changes using `read_file`, `list_files`, or running tests (`bun test`).
 3.  **Tests**: Run relevant tests after changes. If modifying API interactions, ensure you have valid credentials or mock them if appropriate.
-4.  **Linting**: Ensure code adheres to the project's ESLint configuration (`npm run lint`).
-5.  **Dependencies**: Use `npm` for package management.
+4.  **Linting**: Ensure code adheres to the project's ESLint configuration (`bun run lint`).
+5.  **Dependencies**: Use `bun` for package management.

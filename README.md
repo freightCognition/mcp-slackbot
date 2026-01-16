@@ -11,13 +11,13 @@ A Slack bot for executing Carrier Risk Assessments using the MyCarrierPortal API
 - Docker and Docker Compose (Recommended)
 - A Slack workspace with permissions to add apps
 - MyCarrierPortal API access (including Bearer Token, Refresh Token, and Token Endpoint URL)
-- Node.js >= 18.0.0 (if not using Docker)
+- Bun >= 1.0.0 (if not using Docker)
 
 ## Architecture
 
 This application uses a **dual-container architecture** with Docker Compose:
 
-- **mcpslackbot**: Node.js application serving Slack commands and API integration
+- **mcpslackbot**: Bun application serving Slack commands and API integration
 - **libsql**: Database server (Turso libSQL) for persistent token storage
 
 Token persistence ensures OAuth refresh tokens survive container restarts and enables automatic token rotation without manual intervention.
@@ -75,7 +75,7 @@ docker compose up -d
 
 This command will:
 1. Pull the libSQL server image
-2. Build the Node.js application image
+2. Build the Bun application image
 3. Create a persistent volume for token storage
 4. Start both containers in the background
 
@@ -311,18 +311,17 @@ The database will be recreated and seeded with the new tokens.
 
 ## Alternative Deployment Methods (Without Docker)
 
-If you prefer not to use Docker, you can run the application directly with Node.js. **Note:** You'll need to run your own libSQL server or modify the code to use a different database.
+If you prefer not to use Docker, you can run the application directly with Bun. **Note:** You'll need to run your own libSQL server or modify the code to use a different database.
 
 ### Prerequisites for Direct Deployment
-- Node.js >= 18.0.0
-- npm (Node Package Manager)
+- Bun >= 1.0.0
 - libSQL server running (or modify code for different database)
 
 ### Setup and Running
 
 1. **Install dependencies:**
    ```bash
-   npm install
+   bun install
    ```
 
 2. **Configure environment variables:**
@@ -337,15 +336,15 @@ If you prefer not to use Docker, you can run the application directly with Node.
 4. **Run the application:**
    ```bash
    # Development mode
-   npm run dev
+   bun run dev
 
    # Production mode
-   npm start
+   bun start
 
    # Or with PM2
-   npm run pm2:start
-   npm run pm2:logs
-   npm run pm2:stop
+   bun run pm2:start
+   bun run pm2:logs
+   bun run pm2:stop
    ```
 
 ## Slack App Configuration
@@ -415,13 +414,13 @@ The project includes comprehensive test scripts for verifying functionality.
 
 ```bash
 # Run all tests
-npm test
+bun test
 
 # Test bearer token against API
-npm run test:token
+bun run test:token
 
 # Test refresh token functionality
-npm run test:refresh
+bun run test:refresh
 ```
 
 ### Testing Refresh Token with Docker Compose
