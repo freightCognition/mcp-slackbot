@@ -294,8 +294,17 @@ async function refreshAccessToken() {
       logger.warn('New refresh token was not provided in the response. Old refresh token will be reused.');
     }
 
-    // Save tokens to database
-    await saveTokens(BEARER_TOKEN, REFRESH_TOKEN);
+    // Save tokens to database (non-blocking - in-memory tokens remain valid if DB fails)
+    try {
+      await saveTokens(BEARER_TOKEN, REFRESH_TOKEN);
+    } catch (dbError) {
+      logger.error({
+        err: dbError,
+        context: 'refreshAccessToken',
+        tokenRefreshSucceeded: true,
+        newRefreshIssued
+      }, 'Failed to persist tokens to database - in-memory tokens remain valid');
+    }
 
     return { success: true, newRefreshIssued };
   } catch (error) {
