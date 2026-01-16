@@ -566,16 +566,6 @@ app.use((err, req, res, _next) => {
   }, 'Unhandled application error');
   res.status(500).json({ status: 'error', message: 'Internal server error' });
 });
-  logger.error({
-    err,
-    request: {
-      id: req.id,
-      method: req.method,
-      url: req.originalUrl
-    }
-  }, 'Unhandled application error');
-  res.status(500).json({ status: 'error', message: 'Internal server error' });
-});
 
 // Start server with database initialization
 async function startServer() {
