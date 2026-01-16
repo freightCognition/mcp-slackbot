@@ -1,11 +1,13 @@
 const express = require('express');
 const axios = require('axios');
 const crypto = require('crypto');
-// const rawBody = require('raw-body');
 const timingSafeCompare = require('tsscmp');
 const qs = require('qs');
+const pino = require('pino');
+const pinoHttp = require('pino-http');
 require('dotenv').config();
 const { initDb, getTokens, saveTokens } = require('./db');
+const logger = require('./logger');
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -21,33 +23,33 @@ const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
 
 // Verify required environment variables
 if (!BEARER_TOKEN) {
-  console.error('BEARER_TOKEN environment variable is required');
+  logger.error('BEARER_TOKEN environment variable is required');
   process.exit(1);
 }
 if (!REFRESH_TOKEN) {
-  console.error('REFRESH_TOKEN environment variable is required');
+  logger.error('REFRESH_TOKEN environment variable is required');
   process.exit(1);
 }
 if (!TOKEN_ENDPOINT_URL) {
-  console.error('TOKEN_ENDPOINT_URL environment variable is required');
+  logger.error('TOKEN_ENDPOINT_URL environment variable is required');
   process.exit(1);
 }
 if (!CLIENT_ID) {
-  console.error('CLIENT_ID environment variable is required');
+  logger.error('CLIENT_ID environment variable is required');
   process.exit(1);
 }
 if (!CLIENT_SECRET) {
-  console.error('CLIENT_SECRET environment variable is required');
+  logger.error('CLIENT_SECRET environment variable is required');
   process.exit(1);
 }
 
 if (!SLACK_SIGNING_SECRET) {
-  console.error('SLACK_SIGNING_SECRET environment variable is required');
+  logger.error('SLACK_SIGNING_SECRET environment variable is required');
   process.exit(1);
 }
 
 if (!SLACK_WEBHOOK_URL) {
-  console.error('SLACK_WEBHOOK_URL environment variable is required');
+  logger.error('SLACK_WEBHOOK_URL environment variable is required');
   process.exit(1);
 }
 
@@ -57,19 +59,46 @@ async function loadTokens() {
     await initDb();
     const dbTokens = await getTokens();
     if (dbTokens) {
-      console.log('Loaded tokens from database');
+      logger.info('Loaded tokens from database');
       BEARER_TOKEN = dbTokens.bearerToken;
       REFRESH_TOKEN = dbTokens.refreshToken;
     } else {
       // First run - save env tokens to database
-      console.log('No tokens in database, saving from environment');
+      logger.info('No tokens in database, saving from environment');
       await saveTokens(BEARER_TOKEN, REFRESH_TOKEN);
     }
   } catch (error) {
-    console.error('Error loading tokens from database:', error);
-    console.log('Falling back to environment variables');
+    logger.error({ err: error }, 'Error loading tokens from database');
+    logger.warn('Falling back to environment variables');
   }
 }
+
+const requestLogger = pinoHttp({
+  logger,
+  customLogLevel: (res, err) => {
+    if (err || res.statusCode >= 500) return 'error';
+    if (res.statusCode >= 400) return 'warn';
+    return 'info';
+  },
+  serializers: {
+    req(req) {
+      return {
+        id: req.id,
+        method: req.method,
+        url: req.originalUrl
+      };
+    },
+    res(res) {
+      return {
+        statusCode: res.statusCode
+      };
+    },
+    err: pino.stdSerializers.err
+  },
+  autoLogging: {
+    ignore: (req) => req.originalUrl === '/health'
+  }
+});
 
 // Raw body parsing for Slack signature verification
 app.use(express.json({
@@ -78,12 +107,14 @@ app.use(express.json({
   }
 }));
 
-app.use(express.urlencoded({
+app.use(express.urlencoded({ 
   extended: true,
   verify: (req, res, buf) => {
     req.rawBody = buf;
   }
 }));
+
+app.use(requestLogger);
 
 function getRiskLevelEmoji(points) {
   if (points >= 0 && points <= 124) {
@@ -110,7 +141,6 @@ function getRiskLevel(points) {
 }
 
 // Helper function to format infraction details
-// eslint-disable-next-line no-unused-vars
 function formatInfractions(infractions) {
   if (!infractions || infractions.length === 0) {
     return "No infractions found.";
@@ -126,25 +156,50 @@ const verifySlackRequest = (req, res, next) => {
   const timestamp = req.headers['x-slack-request-timestamp'];
 
   if (!signature || !timestamp) {
-    console.error('Missing required Slack headers');
+    logger.warn({
+      requestId: req.id,
+      method: req.method,
+      url: req.originalUrl
+    }, 'Missing required Slack headers');
     return res.status(400).send('Missing required headers');
   }
 
   // Check for replay attacks
   const fiveMinutesAgo = Math.floor(Date.now() / 1000) - 60 * 5;
-  if (timestamp < fiveMinutesAgo) {
-    console.error('Request is too old');
+  const numericTimestamp = parseInt(timestamp, 10);
+
+  // First: Validate timestamp format
+  if (isNaN(numericTimestamp)) {
+    logger.warn({
+      requestId: req.id,
+      method: req.method,
+      url: req.originalUrl
+    }, 'Invalid timestamp');
+    return res.status(400).send('Invalid timestamp');
+  }
+
+  // Second: Check if request is too old
+  if (numericTimestamp < fiveMinutesAgo) {
+    logger.warn({
+      requestId: req.id,
+      method: req.method,
+      url: req.originalUrl
+    }, 'Request is too old');
     return res.status(400).send('Request is too old');
   }
 
   const sigBasestring = `v0:${timestamp}:${req.rawBody}`;
-  const mySignature = 'v0=' +
+  const mySignature = 'v0=' + 
     crypto.createHmac('sha256', SLACK_SIGNING_SECRET)
       .update(sigBasestring, 'utf8')
       .digest('hex');
 
   if (!timingSafeCompare(mySignature, signature)) {
-    console.error('Invalid signature');
+    logger.warn({
+      requestId: req.id,
+      method: req.method,
+      url: req.originalUrl
+    }, 'Invalid signature');
     return res.status(401).send('Invalid signature');
   }
 
@@ -159,7 +214,11 @@ const verifyTestEndpointAuth = (req, res, next) => {
 
   // Check for either Bearer token or X-API-Key header
   if (!authHeader && !apiKey) {
-    console.error('Missing authentication for test endpoint');
+    logger.warn({
+      requestId: req.id,
+      method: req.method,
+      url: req.originalUrl
+    }, 'Missing authentication for test endpoint');
     return res.status(401).json({
       status: 'error',
       message: 'Unauthorized: Missing authentication'
@@ -170,7 +229,7 @@ const verifyTestEndpointAuth = (req, res, next) => {
   const validApiKey = process.env.TEST_API_KEY;
 
   if (!validApiKey) {
-    console.error('TEST_API_KEY not configured');
+    logger.error('TEST_API_KEY not configured');
     return res.status(503).json({
       status: 'error',
       message: 'Service unavailable: Authentication not configured'
@@ -190,7 +249,11 @@ const verifyTestEndpointAuth = (req, res, next) => {
     }
   }
 
-  console.error('Invalid authentication credentials for test endpoint');
+  logger.warn({
+    requestId: req.id,
+    method: req.method,
+    url: req.originalUrl
+  }, 'Invalid authentication credentials for test endpoint');
   return res.status(401).json({
     status: 'error',
     message: 'Unauthorized: Invalid credentials'
@@ -199,7 +262,7 @@ const verifyTestEndpointAuth = (req, res, next) => {
 
 // Function to refresh the access token
 async function refreshAccessToken() {
-  console.log('Attempting to refresh access token...');
+  logger.info('Attempting to refresh access token...');
   try {
     const data = qs.stringify({
       grant_type: 'refresh_token',
@@ -219,32 +282,46 @@ async function refreshAccessToken() {
       throw new Error('New access token not found in refresh response');
     }
 
-    console.log('Access token refreshed successfully.');
+    logger.info('Access token refreshed successfully.');
     BEARER_TOKEN = newAccessToken;
 
     let newRefreshIssued = false;
     if (newRefreshToken) {
-      console.log('New refresh token received.');
+      logger.info('New refresh token received.');
       REFRESH_TOKEN = newRefreshToken;
       newRefreshIssued = true;
     } else {
-      console.warn('New refresh token was not provided in the response. Old refresh token will be reused.');
+      logger.warn('New refresh token was not provided in the response. Old refresh token will be reused.');
     }
 
-    // Save tokens to database
-    await saveTokens(BEARER_TOKEN, REFRESH_TOKEN);
+    // Save tokens to database (non-blocking - in-memory tokens remain valid if DB fails)
+    try {
+      await saveTokens(BEARER_TOKEN, REFRESH_TOKEN);
+    } catch (dbError) {
+      logger.error({
+        err: dbError,
+        context: 'refreshAccessToken',
+        tokenRefreshSucceeded: true,
+        newRefreshIssued
+      }, 'Failed to persist tokens to database - in-memory tokens remain valid');
+    }
 
     return { success: true, newRefreshIssued };
   } catch (error) {
-    console.error('Error refreshing access token:', error.response ? JSON.stringify(error.response.data, null, 2) : error.message);
+    logger.error({
+      err: error,
+      responseData: error.response ? error.response.data : undefined
+    }, 'Error refreshing access token');
     if (error.response && error.response.status === 400) {
-      console.error('Refresh token might be invalid or expired. Manual intervention may be required.');
+      logger.error('Refresh token might be invalid or expired. Manual intervention may be required.');
     }
     return { success: false, newRefreshIssued: false };
   }
 }
 
-app.post('/slack/commands', verifySlackRequest, async (req, res) => {
+const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+app.post('/slack/commands', verifySlackRequest, asyncHandler(async (req, res) => {
   const { text, response_url } = req.body;
 
   if (!text) {
@@ -257,7 +334,7 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
 
   while (attempt < maxAttempts) {
     try {
-      console.log(`Fetching data for MC number: ${mcNumber}, attempt ${attempt + 1}`);
+      logger.info({ mcNumber, attempt: attempt + 1 }, 'Fetching data for MC number');
       const apiResponse = await axios.post(
         'https://mycarrierpacketsapi-stage.azurewebsites.net/api/v1/Carrier/PreviewCarrier',
         null,
@@ -272,12 +349,12 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
       );
 
       if (!apiResponse.data || apiResponse.data.length === 0) {
-        console.log(`No data found for MC number: ${mcNumber}`);
+        logger.info({ mcNumber }, 'No data found for MC number');
         return res.send('No data found for the provided MC number.');
       }
 
       const data = apiResponse.data[0];
-      console.log(`Data received for MC number: ${mcNumber}`);
+      logger.info({ mcNumber }, 'Data received for MC number');
 
       const blocks = [
         {
@@ -343,9 +420,9 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
 
       // Add MyCarrierProtect section
       const mcpData = {
-        TotalPoints: (data.IsBlocked ? 1000 : 0) + (data.FreightValidateStatus === 'Review Recommended' ? 1000 : 0),
+        TotalPoints: (data.IsBlocked ? 1000 : 0) + (data.FreightValidateStatus === 'Review Recommended' ? 1000 : 0), 
         OverallRating: getRiskLevel((data.IsBlocked ? 1000 : 0) + (data.FreightValidateStatus === 'Review Recommended' ? 1000 : 0)),
-        Infractions: []
+        Infractions: [] 
       };
       if (data.IsBlocked) {
         mcpData.Infractions.push({
@@ -395,23 +472,27 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
         blocks: blocks
       };
 
-      console.log(`Sending Slack response for MC number: ${mcNumber}`);
-
+      logger.info({ mcNumber }, 'Sending Slack response for MC number');
+      
       // Send immediate acknowledgment
       res.send();
 
       // Send detailed response via webhook
+      let deliverySucceeded = false;
+
       try {
         await axios.post(SLACK_WEBHOOK_URL, slackResponse, {
           headers: { 'Content-Type': 'application/json' },
           timeout: 5000
         });
+        deliverySucceeded = true;
       } catch (webhookError) {
-        console.error('Error sending webhook response:', webhookError);
+        logger.error({ err: webhookError, mcNumber }, 'Error sending webhook response');
         // Try fallback to response_url if webhook fails
         if (response_url) {
           try {
             await axios.post(response_url, slackResponse, { timeout: 5000 });
+            deliverySucceeded = true;
           } catch (fallbackError) {
             console.error('Error sending fallback response:', fallbackError);
           }
@@ -421,17 +502,21 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
       return;
     } catch (error) {
       if (error.response && error.response.status === 401 && attempt < maxAttempts - 1) {
-        console.log('Access token expired or invalid. Attempting refresh...');
+        logger.warn({ mcNumber, err: error }, 'Access token expired or invalid. Attempting refresh');
         const refreshed = await refreshAccessToken();
         if (refreshed.success) {
-          console.log('Token refreshed. Retrying API call...');
+          logger.info({ mcNumber }, 'Token refreshed. Retrying API call');
           attempt++;
         } else {
-          console.error('Failed to refresh token. Aborting.');
+          logger.error({ mcNumber }, 'Failed to refresh token. Aborting.');
           return res.send("Error: Could not refresh authentication. Please check logs or contact admin.");
         }
       } else {
-        console.error('API call failed or max retries reached:', error.response ? JSON.stringify(error.response.data, null, 2) : error.message);
+        logger.error({
+          err: error,
+          responseData: error.response ? error.response.data : undefined,
+          mcNumber
+        }, 'API call failed or max retries reached');
         let userMessage = 'Error fetching data. Please try again later.';
         if (error.response && error.response.status === 401) {
             userMessage = 'Authentication failed even after attempting to refresh. Please contact an administrator.';
@@ -440,7 +525,7 @@ app.post('/slack/commands', verifySlackRequest, async (req, res) => {
       }
     }
   } // end while loop
-});
+}));
 
 // Add basic health check endpoint
 app.get('/health', (req, res) => {
@@ -455,7 +540,7 @@ app.get('/test/refresh', verifyTestEndpointAuth, async (req, res) => {
   }
 
   try {
-    console.log('Refresh token test endpoint called');
+    logger.info('Refresh token test endpoint called');
     const result = await refreshAccessToken();
     if (result.success) {
       res.json({
@@ -472,7 +557,7 @@ app.get('/test/refresh', verifyTestEndpointAuth, async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('Error in refresh test endpoint:', error);
+    logger.error({ err: error }, 'Error in refresh test endpoint');
     res.status(500).json({
       status: 'error',
       message: error.message,
@@ -481,15 +566,42 @@ app.get('/test/refresh', verifyTestEndpointAuth, async (req, res) => {
   }
 });
 
+app.use((err, req, res, next) => {
+  logger.error({
+    err,
+    request: {
+      id: req.id,
+      method: req.method,
+      url: req.originalUrl
+    }
+  }, 'Unhandled application error');
+
+  if (res.headersSent) {
+    return next(err);
+  }
+
+  res.status(500).json({ status: 'error', message: 'Internal server error' });
+});
+
 // Start server with database initialization
 async function startServer() {
   await loadTokens();
   app.listen(port, () => {
-    console.log(`Server is running on port ${port}`);
+    logger.info({ port }, 'Server is running');
   });
 }
 
+process.on('unhandledRejection', (reason) => {
+  logger.error({ err: reason }, 'Unhandled promise rejection');
+  process.exit(1);
+});
+
+process.on('uncaughtException', (err) => {
+  logger.error({ err }, 'Uncaught exception');
+  process.exit(1);
+});
+
 startServer().catch(err => {
-  console.error('Failed to start server:', err);
+  logger.error({ err }, 'Failed to start server');
   process.exit(1);
 });
