@@ -243,9 +243,11 @@ const verifyTestEndpointAuth = (req, res, next) => {
 
   // Check Authorization: Bearer header
   if (authHeader) {
-    const token = authHeader.replace('Bearer ', '');
-    if (timingSafeCompare(token, validApiKey)) {
-      return next();
+    const parts = authHeader.split(' ');
+    if (parts.length === 2 && parts[0] === 'Bearer') {
+      if (timingSafeCompare(parts[1], validApiKey)) {
+        return next();
+      }
     }
   }
 
