@@ -243,12 +243,9 @@ const verifyTestEndpointAuth = (req, res, next) => {
 
   // Check Authorization: Bearer header
   if (authHeader) {
-    const match = authHeader.match(/^Bearer\s+(.+)$/i);
-    if (match) {
-      const token = match[1];
-      if (timingSafeCompare(token, validApiKey)) {
-        return next();
-      }
+    const token = authHeader.replace('Bearer ', '');
+    if (timingSafeCompare(token, validApiKey)) {
+      return next();
     }
   }
 
@@ -297,8 +294,17 @@ async function refreshAccessToken() {
       logger.warn('New refresh token was not provided in the response. Old refresh token will be reused.');
     }
 
-    // Save tokens to database
-    await saveTokens(BEARER_TOKEN, REFRESH_TOKEN);
+    // Save tokens to database (non-blocking - in-memory tokens remain valid if DB fails)
+    try {
+      await saveTokens(BEARER_TOKEN, REFRESH_TOKEN);
+    } catch (dbError) {
+      logger.error({
+        err: dbError,
+        context: 'refreshAccessToken',
+        tokenRefreshSucceeded: true,
+        newRefreshIssued
+      }, 'Failed to persist tokens to database - in-memory tokens remain valid');
+    }
 
     return { success: true, newRefreshIssued };
   } catch (error) {
@@ -488,20 +494,8 @@ app.post('/slack/commands', verifySlackRequest, asyncHandler(async (req, res) =>
             await axios.post(response_url, slackResponse, { timeout: 5000 });
             deliverySucceeded = true;
           } catch (fallbackError) {
-            logger.error({ err: fallbackError, mcNumber }, 'Error sending fallback response');
+            console.error('Error sending fallback response:', fallbackError);
           }
-        }
-      }
-
-      // If both webhook and fallback failed, notify user via response_url as last resort
-      if (!deliverySucceeded && response_url) {
-        try {
-          await axios.post(response_url, {
-            response_type: 'ephemeral',
-            text: `Error: Unable to deliver carrier assessment results for MC ${mcNumber}. Please try again or contact support.`
-          }, { timeout: 5000 });
-        } catch (lastResortError) {
-          logger.error({ err: lastResortError, mcNumber }, 'Failed to send error notification to user');
         }
       }
 
@@ -572,7 +566,7 @@ app.get('/test/refresh', verifyTestEndpointAuth, async (req, res) => {
   }
 });
 
-app.use((err, req, res, _next) => {
+app.use((err, req, res, next) => {
   logger.error({
     err,
     request: {
@@ -581,6 +575,11 @@ app.use((err, req, res, _next) => {
       url: req.originalUrl
     }
   }, 'Unhandled application error');
+
+  if (res.headersSent) {
+    return next(err);
+  }
+
   res.status(500).json({ status: 'error', message: 'Internal server error' });
 });
 
