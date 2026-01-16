@@ -2,7 +2,7 @@ const { createClient } = require('@libsql/client');
 const logger = require('./logger');
 
 const db = createClient({
-  url: process.env.LIBSQL_URL || 'http://localhost:8080'
+  url: process.env.LIBSQL_URL || 'http://localhost:8081'
 });
 
 // Initialize schema
