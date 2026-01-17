@@ -1,5 +1,8 @@
 FROM oven/bun:1-alpine
 
+# Install curl for health checks
+RUN apk add --no-cache curl
+
 # Set working directory
 WORKDIR /usr/src/app
 
@@ -18,7 +21,7 @@ RUN chown -R bun:bun /usr/src/app
 # Use non-root user
 USER bun
 
-# Expose port
+# Expose port for health check endpoint (Bolt customRoutes)
 EXPOSE 3001
 
 # Start the application

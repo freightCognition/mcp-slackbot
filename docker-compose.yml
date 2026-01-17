@@ -23,13 +23,17 @@ services:
       BEARER_TOKEN: ${BEARER_TOKEN}
       REFRESH_TOKEN: ${REFRESH_TOKEN}
       TOKEN_ENDPOINT_URL: ${TOKEN_ENDPOINT_URL}
-      CLIENT_ID: ${CLIENT_ID}
-      CLIENT_SECRET: ${CLIENT_SECRET}
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
       SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET}
-      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN}
     ports:
-      - 3001:3001
+      - 3001:3001  # Health check endpoint
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
 volumes:

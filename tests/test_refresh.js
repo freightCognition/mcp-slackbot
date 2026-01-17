@@ -41,7 +41,7 @@ async function saveTokens(bearerToken, refreshToken) {
       args: [bearerToken, refreshToken]
     });
     console.log('Tokens saved to database');
-  } catch (error) {
+  } catch {
     console.log('Warning: Could not save to database (libsql not available) - tokens only in memory');
   }
 }
