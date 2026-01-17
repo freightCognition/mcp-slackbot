@@ -3,14 +3,14 @@ name: Deploy to Production
 # Trigger the workflow on push to main branch
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   # Allow manual triggering from GitHub UI with branch selection
   workflow_dispatch:
     inputs:
       branch:
-        description: 'Branch to deploy'
+        description: "Branch to deploy"
         required: false
-        default: 'main'
+        default: "main"
         type: string
 
 jobs:
@@ -20,106 +20,107 @@ jobs:
     runs-on: self-hosted
 
     steps:
-    # Step 1: Determine which branch to deploy
-    - name: Set deployment branch
-      id: set_branch
-      run: |
-        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-          INPUT_BRANCH="${{ github.event.inputs.branch }}"
-          if [ -z "$INPUT_BRANCH" ]; then
-            BRANCH="main"
+      # Step 1: Determine which branch to deploy
+      - name: Set deployment branch
+        id: set_branch
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            INPUT_BRANCH="${{ github.event.inputs.branch }}"
+            if [ -z "$INPUT_BRANCH" ]; then
+              BRANCH="main"
+            else
+              BRANCH="$INPUT_BRANCH"
+            fi
           else
-            BRANCH="$INPUT_BRANCH"
+            BRANCH="${{ github.ref_name }}"
           fi
-        else
-          BRANCH="${{ github.ref_name }}"
-        fi
-        echo "branch=$BRANCH" >> $GITHUB_OUTPUT
-        echo "Deploying branch: $BRANCH"
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+          echo "Deploying branch: $BRANCH"
 
-    # Step 2: Checkout the specified branch
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ steps.set_branch.outputs.branch }}
+      # Step 2: Checkout the specified branch
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.set_branch.outputs.branch }}
 
-    # Step 3: Stop existing containers (if running)
-    - name: Stop existing containers
-      run: |
-        echo "Stopping existing containers..."
-        docker compose down || true
-      continue-on-error: true
+      # Step 3: Stop existing containers (if running)
+      - name: Stop existing containers
+        run: |
+          echo "Stopping existing containers..."
+          docker compose down || true
+        continue-on-error: true
 
-    # Step 4: Create .env file with secrets
-    - name: Create environment file
-      run: |
-        echo "Creating .env file..."
-        cat > .env << EOF
-        NODE_ENV=production
-        PORT=3001
-        LIBSQL_URL=http://libsql:8081
-        BEARER_TOKEN=${{ secrets.BEARER_TOKEN }}
-        REFRESH_TOKEN=${{ secrets.REFRESH_TOKEN }}
-        TOKEN_ENDPOINT_URL=${{ secrets.TOKEN_ENDPOINT_URL }}
-        CLIENT_ID=${{ secrets.CLIENT_ID }}
-        CLIENT_SECRET=${{ secrets.CLIENT_SECRET }}
-        SLACK_SIGNING_SECRET=${{ secrets.SLACK_SIGNING_SECRET }}
-        SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}
-        EOF
+      # Step 4: Create .env file with secrets
+      - name: Create environment file
+        run: |
+          echo "Creating .env file..."
+          cat > .env << EOF
+          NODE_ENV=production
+          PORT=3001
+          LIBSQL_URL=http://libsql:8081
+          BEARER_TOKEN=${{ secrets.BEARER_TOKEN }}
+          REFRESH_TOKEN=${{ secrets.REFRESH_TOKEN }}
+          TOKEN_ENDPOINT_URL=${{ secrets.TOKEN_ENDPOINT_URL }}
+          CLIENT_ID=${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET=${{ secrets.CLIENT_SECRET }}
+          SLACK_SIGNING_SECRET=${{ secrets.SLACK_SIGNING_SECRET }}
+          SLACK_BOT_TOKEN=${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_APP_TOKEN=${{ secrets.SLACK_APP_TOKEN }}
+          EOF
 
-    # Step 5: Build and start containers with docker compose
-    - name: Start containers
-      run: |
-        echo "Starting containers with docker compose..."
-        docker compose up -d --build
+      # Step 5: Build and start containers with docker compose
+      - name: Start containers
+        run: |
+          echo "Starting containers with docker compose..."
+          docker compose up -d --build
 
-    # Step 6: Wait and verify deployment
-    - name: Verify deployment
-      run: |
-        echo "Waiting for containers to start..."
-        sleep 15
+      # Step 6: Wait and verify deployment
+      - name: Verify deployment
+        run: |
+          echo "Waiting for containers to start..."
+          sleep 15
 
-        if docker compose ps | grep -q "Up\|running"; then
-          echo "✅ Containers are running!"
-          docker compose ps
+          if docker compose ps | grep -q "Up\|running"; then
+            echo "✅ Containers are running!"
+            docker compose ps
 
-          # Test the health endpoint
-          echo "Testing health endpoint..."
-          if curl -f http://localhost:3001/health; then
-            echo "✅ Health check passed!"
+            # Test the health endpoint
+            echo "Testing health endpoint..."
+            if curl -f http://localhost:3001/health; then
+              echo "✅ Health check passed!"
+            else
+              echo "❌ Health check failed!"
+              docker compose logs
+              exit 1
+            fi
           else
-            echo "❌ Health check failed!"
+            echo "❌ Containers failed to start!"
             docker compose logs
             exit 1
           fi
-        else
-          echo "❌ Containers failed to start!"
-          docker compose logs
-          exit 1
-        fi
 
-    # Step 7: Test refresh token functionality
-    - name: Test refresh token
-      run: |
-        echo "Testing refresh token functionality..."
-        if docker compose exec -T mcpslackbot node tests/test_refresh.js; then
-          echo "✅ Refresh token test passed!"
-        else
-          echo "❌ Refresh token test failed!"
-          docker compose logs
-          exit 1
-        fi
+      # Step 7: Test refresh token functionality
+      - name: Test refresh token
+        run: |
+          echo "Testing refresh token functionality..."
+          if docker compose exec -T mcpslackbot node tests/test_refresh.js; then
+            echo "✅ Refresh token test passed!"
+          else
+            echo "❌ Refresh token test failed!"
+            docker compose logs
+            exit 1
+          fi
 
-    # Step 8: Clean up .env file for security
-    - name: Clean up
-      run: |
-        rm -f .env
-        echo "Cleaned up temporary files"
-      if: always()
+      # Step 8: Clean up .env file for security
+      - name: Clean up
+        run: |
+          rm -f .env
+          echo "Cleaned up temporary files"
+        if: always()
 
-    # Step 9: Send notification
-    - name: Deployment notification
-      run: |
-        echo "🚀 Deployment completed successfully!"
-        echo "Branch deployed: ${{ steps.set_branch.outputs.branch }}"
-        echo "Application is now running on $(hostname) at port 3001"
+      # Step 9: Send notification
+      - name: Deployment notification
+        run: |
+          echo "🚀 Deployment completed successfully!"
+          echo "Branch deployed: ${{ steps.set_branch.outputs.branch }}"
+          echo "Application is now running on $(hostname) at port 3001"
