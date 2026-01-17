@@ -172,13 +172,13 @@ async function refreshAccessToken() {
 slackApp.command('/mcp', async ({ command, ack, respond }) => {
   await ack();
 
+  // Helper for ephemeral responses
+  const ephemeral = async (text) => respond({ text, response_type: 'ephemeral' });
+
   const { text } = command;
 
   if (!text) {
-    await respond({
-      text: 'Please provide a valid MC number.',
-      response_type: 'ephemeral'
-    });
+    await ephemeral('Please provide a valid MC number.');
     return;
   }
 
@@ -204,10 +204,7 @@ slackApp.command('/mcp', async ({ command, ack, respond }) => {
 
       if (!apiResponse.data || apiResponse.data.length === 0) {
         logger.info({ mcNumber }, 'No data found for MC number');
-        await respond({
-          text: 'No data found for the provided MC number.',
-          response_type: 'ephemeral'
-        });
+        await ephemeral('No data found for the provided MC number.');
         return;
       }
 
@@ -344,10 +341,7 @@ slackApp.command('/mcp', async ({ command, ack, respond }) => {
           attempt++;
         } else {
           logger.error({ mcNumber }, 'Failed to refresh token. Aborting.');
-          await respond({
-            text: 'Error: Could not refresh authentication. Please check logs or contact admin.',
-            response_type: 'ephemeral'
-          });
+          await ephemeral('Error: Could not refresh authentication. Please check logs or contact admin.');
           return;
         }
       } else {
@@ -360,10 +354,7 @@ slackApp.command('/mcp', async ({ command, ack, respond }) => {
         if (error.response && error.response.status === 401) {
           userMessage = 'Authentication failed even after attempting to refresh. Please contact an administrator.';
         }
-        await respond({
-          text: userMessage,
-          response_type: 'ephemeral'
-        });
+        await ephemeral(userMessage);
         return;
       }
     }
