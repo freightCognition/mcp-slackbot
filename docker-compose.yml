@@ -28,8 +28,7 @@ services:
       SLACK_APP_TOKEN: ${SLACK_APP_TOKEN}
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
       SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET}
-    ports:
-      - 3001:3001
+    restart: unless-stopped
     restart: unless-stopped
 
 volumes:
