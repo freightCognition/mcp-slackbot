@@ -288,7 +288,7 @@ async function fetchCarrierContacts(mcNumber) {
 async function sendIntellivite(mcNumber, email) {
   return apiCall("/api/v1/Carrier/EmailPacketInvitation", {
     docketNumber: mcNumber,
-    email: email,
+    carrierEmail: email,
   });
 }
 
@@ -353,32 +353,24 @@ function buildStep1View(carrierData, mcNumber, channelId, wizardId = null) {
     { type: "divider" },
   ];
 
-  // Risk categories with collapsible details
+  // Risk categories - compact summary (details available in Step 2)
   const categories = ["Authority", "Insurance", "Operation", "Safety", "Other"];
-  categories.forEach((category) => {
-    const categoryData = risk[category];
-    if (categoryData) {
-      const infractions = categoryData.Infractions || [];
-      const infractionSummary =
-        infractions.length > 0
-          ? infractions
-              .slice(0, 3)
-              .map((i) => `  - ${i.RuleText} (${i.Points} pts)`)
-              .join("\n")
-          : "  No infractions";
-      const moreCount =
-        infractions.length > 3
-          ? `\n  ...and ${infractions.length - 3} more`
-          : "";
+  const riskLines = categories
+    .filter((category) => risk[category])
+    .map((category) => {
+      const categoryData = risk[category];
+      const infractionCount = categoryData.Infractions?.length || 0;
+      const countText = infractionCount > 0 ? ` (${infractionCount})` : "";
+      return `*${category}:* ${getRiskLevelEmoji(categoryData.TotalPoints)} ${getRiskLevel(categoryData.TotalPoints)} (${categoryData.TotalPoints || 0} pts)${countText}`;
+    })
+    .join("\n");
 
-      blocks.push({
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: `*${category}:* ${getRiskLevelEmoji(categoryData.TotalPoints)} ${getRiskLevel(categoryData.TotalPoints)} (${categoryData.TotalPoints || 0} pts)\n${infractionSummary}${moreCount}`,
-        },
-      });
-    }
+  blocks.push({
+    type: "section",
+    text: {
+      type: "mrkdwn",
+      text: riskLines || "No risk data available",
+    },
   });
 
   // MyCarrierProtect section if applicable
@@ -576,12 +568,13 @@ function buildStep3View(wizardId, vinVerifications = []) {
     });
 
     vinVerifications.slice(0, 10).forEach((vin) => {
+      const status = vin.VINVerificationStatus?.Description || "Unknown";
       blocks.push({
         type: "context",
         elements: [
           {
             type: "mrkdwn",
-            text: `VIN: ${vin.VIN || vin.Vin || "N/A"} | Year: ${vin.Year || "N/A"} | Make: ${vin.Make || "N/A"} | Model: ${vin.Model || "N/A"}`,
+            text: `VIN: \`${vin.VIN || "N/A"}\` | Status: ${status}`,
           },
         ],
       });
@@ -638,6 +631,7 @@ function buildStep3View(wizardId, vinVerifications = []) {
   return {
     type: "modal",
     callback_id: "carrier_wizard",
+    notify_on_close: true,
     private_metadata: JSON.stringify({ wizardId, step: 3 }),
     title: { type: "plain_text", text: "Vehicles", emoji: true },
     blocks,
@@ -660,17 +654,23 @@ function buildStep4View(wizardId, contacts = []) {
     { type: "divider" },
   ];
 
-  // Contact selection
+  // Contact selection - API returns FirstName, LastName, Email
   const contactOptions = (contacts || [])
     .slice(0, 10)
     .filter((c) => c.Email)
-    .map((contact) => ({
-      text: {
-        type: "plain_text",
-        text: `${contact.Name || contact.ContactName || "Unknown"} - ${contact.Email}`,
-      },
-      value: contact.Email,
-    }));
+    .map((contact) => {
+      const name =
+        contact.FirstName && contact.LastName
+          ? `${contact.FirstName} ${contact.LastName}`
+          : contact.Name || contact.ContactName || "Unknown";
+      return {
+        text: {
+          type: "plain_text",
+          text: `${name} - ${contact.Email}`,
+        },
+        value: contact.Email,
+      };
+    });
 
   if (contactOptions.length > 0) {
     blocks.push({
@@ -709,7 +709,7 @@ function buildStep4View(wizardId, contacts = []) {
     optional: true,
   });
 
-  // Navigation buttons
+  // Navigation buttons (Back and Decline only - Submit handled by modal submit)
   blocks.push(
     { type: "divider" },
     {
@@ -719,12 +719,6 @@ function buildStep4View(wizardId, contacts = []) {
           type: "button",
           text: { type: "plain_text", text: "\u2190 Back", emoji: true },
           action_id: "wizard_back",
-        },
-        {
-          type: "button",
-          text: { type: "plain_text", text: "Send Intellivite", emoji: true },
-          action_id: "wizard_send_intellivite",
-          style: "primary",
         },
         {
           type: "button",
@@ -738,7 +732,10 @@ function buildStep4View(wizardId, contacts = []) {
 
   return {
     type: "modal",
-    callback_id: "carrier_wizard",
+    callback_id: "carrier_wizard_step4",
+    notify_on_close: true,
+    submit: { type: "plain_text", text: "Send Intellivite" },
+    close: { type: "plain_text", text: "Cancel" },
     private_metadata: JSON.stringify({ wizardId, step: 4 }),
     title: { type: "plain_text", text: "Send Invite", emoji: true },
     blocks,
@@ -904,17 +901,23 @@ slackApp.action("wizard_next", async ({ ack, body, client }) => {
   if (step === 1) {
     // Moving to Step 2 - fetch incident reports
     const incidentResult = await fetchCarrierIncidentReports(mcNumber);
-    const incidentReports = incidentResult.success ? incidentResult.data : [];
+    const incidentReports = incidentResult.success
+      ? incidentResult.data?.IncidentReports || []
+      : [];
     newView = buildStep2View(wizardId, incidentReports);
   } else if (step === 2) {
     // Moving to Step 3 - fetch VIN verifications
     const vinResult = await fetchCarrierVINVerifications(mcNumber);
-    const vinVerifications = vinResult.success ? vinResult.data : [];
+    const vinVerifications = vinResult.success
+      ? vinResult.data?.VINVerifications || []
+      : [];
     newView = buildStep3View(wizardId, vinVerifications);
   } else if (step === 3) {
     // Moving to Step 4 - fetch contacts
     const contactsResult = await fetchCarrierContacts(mcNumber);
-    const contacts = contactsResult.success ? contactsResult.data : [];
+    const contacts = contactsResult.success
+      ? contactsResult.data?.Carrier?.Contacts || []
+      : [];
     newView = buildStep4View(wizardId, contacts);
   }
 
@@ -1162,6 +1165,124 @@ slackApp.view("carrier_wizard", async ({ ack, body, view }) => {
   // This handles view_submission - just acknowledge
   await ack();
 });
+
+// Handle Step 4 modal submission (Send Intellivite)
+slackApp.view("carrier_wizard_step4", async ({ ack, body, view, client }) => {
+  const { wizardId } = JSON.parse(view.private_metadata);
+  const state = wizardState.get(wizardId);
+  const userId = body.user.id;
+
+  if (!state) {
+    await ack({
+      response_action: "errors",
+      errors: {
+        manual_email_block: "Session expired. Please start a new assessment.",
+      },
+    });
+    return;
+  }
+
+  const { mcNumber, channelId, carrierData } = state;
+
+  // Get email from manual input or selected contact
+  const manualEmail =
+    view.state?.values?.manual_email_block?.manual_email_input?.value;
+  const stateKey = `${userId}_selected_email`;
+  const selectedEmail = wizardState.get(stateKey);
+  const email = manualEmail || selectedEmail;
+
+  if (!email) {
+    await ack({
+      response_action: "errors",
+      errors: {
+        manual_email_block:
+          "Please select a contact or enter an email address.",
+      },
+    });
+    return;
+  }
+
+  // Acknowledge immediately while we process
+  await ack();
+
+  logger.info(
+    { mcNumber, email, userId },
+    "Sending Intellivite via form submit",
+  );
+
+  // Send Intellivite invitation
+  const result = await sendIntellivite(mcNumber, email);
+
+  if (!result.success) {
+    logger.error(
+      { err: result.message, mcNumber, email },
+      "Failed to send Intellivite",
+    );
+    // Post error to channel since modal is already closed
+    try {
+      await client.chat.postMessage({
+        channel: channelId,
+        text: `Failed to send Intellivite for MC${mcNumber}: ${result.message}`,
+      });
+    } catch (error) {
+      logger.error({ err: error }, "Failed to post error message");
+    }
+    return;
+  }
+
+  // Log to audit
+  try {
+    await logAuditEntry(userId, mcNumber, "invite");
+  } catch (error) {
+    logger.error({ err: error }, "Failed to log audit entry");
+  }
+
+  // Clean up wizard state
+  wizardState.delete(stateKey);
+  wizardState.delete(wizardId);
+
+  // Clear active assessment for channel
+  clearActiveAssessment(channelId);
+
+  // Post success message to channel
+  const carrierName = carrierData?.CompanyName || "Unknown Carrier";
+  try {
+    await client.chat.postMessage({
+      channel: channelId,
+      text: `<@${userId}> invited ${carrierName} (MC${mcNumber}) via Intellivite\nContact: ${email}`,
+    });
+  } catch (error) {
+    logger.error({ err: error }, "Failed to post success message");
+  }
+});
+
+// Handle Step 4 modal close
+slackApp.view(
+  { callback_id: "carrier_wizard_step4", type: "view_closed" },
+  async ({ ack, body, view }) => {
+    await ack();
+
+    try {
+      const metadata = JSON.parse(view.private_metadata || "{}");
+      const { wizardId } = metadata;
+
+      if (wizardId) {
+        const state = wizardState.get(wizardId);
+        if (state) {
+          const { channelId } = state;
+          // Clean up
+          clearActiveAssessment(channelId);
+          wizardState.delete(wizardId);
+          const stateKey = `${body.user.id}_selected_email`;
+          wizardState.delete(stateKey);
+          logger.info({ wizardId }, "Step 4 wizard closed, cleaned up state");
+        }
+      }
+    } catch (error) {
+      logger.error({ err: error }, "Error handling step 4 view close");
+    }
+  },
+);
 
 slackApp.view(
   { callback_id: "carrier_wizard", type: "view_closed" },
