@@ -69,10 +69,6 @@ ehthumbs.db
 tests/*
 
 
-.claude/
-CLAUDE.md
-*CLAUDE.md
-
 .postman/
 .postman_environments
 postman_collection.json
@@ -84,7 +80,7 @@ postman/
 postman/*.json
 postman/**/*.json
 
-
+.claude/
 .auto-claude/
 
 docs/
