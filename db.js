@@ -1,8 +1,8 @@
-const { createClient } = require('@libsql/client');
-const logger = require('./logger');
+const { createClient } = require("@libsql/client");
+const logger = require("./logger");
 
 const db = createClient({
-  url: process.env.LIBSQL_URL || 'http://localhost:8081'
+  url: process.env.LIBSQL_URL || "http://localhost:8081",
 });
 
 // Initialize schema
@@ -15,18 +15,33 @@ async function initDb() {
       updated_at TEXT DEFAULT (datetime('now'))
     )
   `);
-  logger.info('Database initialized');
+
+  // Audit log for carrier wizard actions (invite/decline)
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+      slack_user_id TEXT NOT NULL,
+      mc_number TEXT NOT NULL,
+      action TEXT NOT NULL CHECK (action IN ('invite', 'decline')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
+  logger.info("Database initialized");
 }
 
 // Get current tokens
 async function getTokens() {
-  const result = await db.execute('SELECT bearer_token, refresh_token FROM tokens WHERE id = 1');
+  const result = await db.execute(
+    "SELECT bearer_token, refresh_token FROM tokens WHERE id = 1",
+  );
   if (result.rows.length === 0) {
     return null;
   }
   return {
     bearerToken: result.rows[0].bearer_token,
-    refreshToken: result.rows[0].refresh_token
+    refreshToken: result.rows[0].refresh_token,
   };
 }
 
@@ -39,9 +54,18 @@ async function saveTokens(bearerToken, refreshToken) {
             bearer_token = excluded.bearer_token,
             refresh_token = excluded.refresh_token,
             updated_at = datetime('now')`,
-    args: [bearerToken, refreshToken]
+    args: [bearerToken, refreshToken],
   });
-  logger.info('Tokens saved to database');
+  logger.info("Tokens saved to database");
 }
 
-module.exports = { db, initDb, getTokens, saveTokens };
+// Log audit entry for carrier wizard actions
+async function logAuditEntry(slackUserId, mcNumber, action) {
+  await db.execute({
+    sql: `INSERT INTO audit_log (slack_user_id, mc_number, action) VALUES (?, ?, ?)`,
+    args: [slackUserId, mcNumber, action],
+  });
+  logger.info({ slackUserId, mcNumber, action }, "Audit entry logged");
+}
+
+module.exports = { db, initDb, getTokens, saveTokens, logAuditEntry };
