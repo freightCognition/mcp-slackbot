@@ -538,15 +538,15 @@ function buildStep1View(carrierData, mcNumber, channelId, wizardId = null) {
       elements: [
         {
           type: "button",
-          text: { type: "plain_text", text: "Next \u2192", emoji: true },
-          action_id: "wizard_next",
-          style: "primary",
-        },
-        {
-          type: "button",
           text: { type: "plain_text", text: "Decline", emoji: true },
           action_id: "wizard_decline",
           style: "danger",
+        },
+        {
+          type: "button",
+          text: { type: "plain_text", text: "Next \u2192", emoji: true },
+          action_id: "wizard_next",
+          style: "primary",
         },
       ],
     },
@@ -674,8 +674,9 @@ function buildStep2View(wizardId, incidentReports = []) {
       elements: [
         {
           type: "button",
-          text: { type: "plain_text", text: "\u2190 Back", emoji: true },
-          action_id: "wizard_back",
+          text: { type: "plain_text", text: "Decline", emoji: true },
+          action_id: "wizard_decline",
+          style: "danger",
         },
         {
           type: "button",
@@ -685,9 +686,8 @@ function buildStep2View(wizardId, incidentReports = []) {
         },
         {
           type: "button",
-          text: { type: "plain_text", text: "Decline", emoji: true },
-          action_id: "wizard_decline",
-          style: "danger",
+          text: { type: "plain_text", text: "\u2190 Back", emoji: true },
+          action_id: "wizard_back",
         },
       ],
     },
