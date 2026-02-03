@@ -82,6 +82,7 @@ postman/**/*.json
 
 .claude/
 .auto-claude/
+.codex/
 
 docs/
 thoughts/
