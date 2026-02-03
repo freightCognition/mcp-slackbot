@@ -55,6 +55,7 @@ if (!SLACK_APP_TOKEN) {
 
 // Track database availability for health checks
 let dbAvailable = false;
+const VIN_PAGE_SIZE = 10;
 
 const slackApp = new App({
   token: SLACK_BOT_TOKEN,
@@ -126,6 +127,79 @@ function getRiskLevel(points) {
   } else {
     return "Fail";
   }
+}
+
+function normalizeNullableText(value, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const text = String(value).trim();
+  if (!text) return fallback;
+  const lower = text.toLowerCase();
+  if (lower === "null" || lower === "undefined") return fallback;
+  return text;
+}
+
+function formatSlackLinks(text) {
+  const input = normalizeNullableText(text, "");
+  if (!input) return "";
+  const withSlackLinks = input.replace(
+    /<a\s+[^>]*href=["']([^"']+)["'][^>]*>(.*?)<\/a>/gi,
+    (_match, url, label) => `<${url}|${label}>`,
+  );
+  return withSlackLinks.replace(/<([^>\s]+)([^>]*)>/g, (match, token) => {
+    const lower = token.toLowerCase();
+    if (
+      lower.startsWith("http") ||
+      lower.startsWith("mailto:") ||
+      lower.startsWith("tel:") ||
+      lower.startsWith("@") ||
+      lower.startsWith("#") ||
+      lower.startsWith("!")
+    ) {
+      return match;
+    }
+    return "";
+  });
+}
+
+function formatInfractionLine(infraction) {
+  const ruleText = normalizeNullableText(
+    infraction?.RuleText,
+    "Unknown infraction",
+  );
+  const output = formatSlackLinks(infraction?.RuleOutput);
+  const points = infraction?.Points ?? "N/A";
+  if (output) {
+    return `- ${ruleText}: ${output} (${points} pts)`;
+  }
+  return `- ${ruleText} (${points} pts)`;
+}
+
+function chunkLines(lines, maxLines = 5, maxChars = 1800) {
+  const chunks = [];
+  let current = [];
+  let currentLength = 0;
+
+  lines.forEach((line) => {
+    const lineText = String(line);
+    const lineLength = lineText.length + (current.length > 0 ? 1 : 0);
+    const exceedsChars = currentLength + lineLength > maxChars;
+    const exceedsLines = current.length >= maxLines;
+
+    if (current.length > 0 && (exceedsChars || exceedsLines)) {
+      chunks.push(current);
+      current = [];
+      currentLength = 0;
+    }
+
+    current.push(lineText);
+    currentLength += lineText.length + (current.length > 1 ? 1 : 0);
+  });
+
+  if (current.length > 0) {
+    chunks.push(current);
+  }
+
+  return chunks;
 }
 
 // In-memory wizard state storage (keyed by view_id or user_id + mc_number)
@@ -297,10 +371,47 @@ function generateWizardId() {
   return `wiz_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
+function buildSessionExpiredView(titleText = "Session expired") {
+  return {
+    type: "modal",
+    callback_id: "carrier_wizard",
+    title: { type: "plain_text", text: titleText, emoji: true },
+    close: { type: "plain_text", text: "Close", emoji: true },
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: "Session expired. Please start a new assessment.",
+        },
+      },
+      {
+        type: "actions",
+        elements: [
+          {
+            type: "button",
+            text: { type: "plain_text", text: "← Back", emoji: true },
+            action_id: "wizard_back",
+          },
+        ],
+      },
+    ],
+  };
+}
+
 // Build Step 1: Assessment Overview modal
 function buildStep1View(carrierData, mcNumber, channelId, wizardId = null) {
   const data = Array.isArray(carrierData) ? carrierData[0] : carrierData;
   const risk = data.RiskAssessmentDetails || {};
+  const companyName = normalizeNullableText(data.CompanyName, "Unknown Carrier");
+  const dbaName = normalizeNullableText(data.DBAName, "");
+  const dotNumber = normalizeNullableText(data.DotNumber, "N/A");
+  const docketNumber = normalizeNullableText(data.DocketNumber, "N/A");
+  const trucksTotal = normalizeNullableText(data.TrucksTotal, "N/A");
+  const driversTotal = normalizeNullableText(data.DriversTotal, "N/A");
+  const city = normalizeNullableText(data.City, "N/A");
+  const state = normalizeNullableText(data.State, "N/A");
+  const authorityStatus = normalizeNullableText(data.AuthorityStatus, "N/A");
 
   // Generate wizard ID if not provided (first call) and store data in memory
   const wId = wizardId || generateWizardId();
@@ -309,16 +420,16 @@ function buildStep1View(carrierData, mcNumber, channelId, wizardId = null) {
   }
 
   // Build company name with DBA if present
-  const companyDisplay = data.DBAName
-    ? `*${data.CompanyName}*\n_DBA: ${data.DBAName}_`
-    : `*${data.CompanyName}*`;
+  const companyDisplay = dbaName
+    ? `*${companyName}*\n_DBA: ${dbaName}_`
+    : `*${companyName}*`;
 
   const blocks = [
     {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `${companyDisplay}\nDOT: ${data.DotNumber} | MC: ${data.DocketNumber}`,
+        text: `${companyDisplay}\nDOT: ${dotNumber} | MC: ${docketNumber}`,
       },
     },
     {
@@ -326,52 +437,79 @@ function buildStep1View(carrierData, mcNumber, channelId, wizardId = null) {
       fields: [
         {
           type: "mrkdwn",
-          text: `*Trucks:*\n${data.TrucksTotal}`,
+          text: `*Trucks:*\n${trucksTotal}`,
         },
         {
           type: "mrkdwn",
-          text: `*Drivers:*\n${data.DriversTotal}`,
+          text: `*Drivers:*\n${driversTotal}`,
+        },
+      ],
+    },
+    {
+      type: "section",
+      fields: [
+        {
+          type: "mrkdwn",
+          text: `*Location:*\n${city}, ${state}`,
         },
         {
           type: "mrkdwn",
-          text: `*Location:*\n${data.City}, ${data.State}`,
-        },
-        {
-          type: "mrkdwn",
-          text: `*Authority:*\n${data.AuthorityStatus}`,
+          text: `*Authority:*\n${authorityStatus}`,
         },
       ],
     },
     { type: "divider" },
     {
       type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `*Overall Risk Assessment:* ${getRiskLevelEmoji(risk.TotalPoints)} ${getRiskLevel(risk.TotalPoints)} (${risk.TotalPoints || 0} pts)`,
-      },
+      fields: [
+        {
+          type: "mrkdwn",
+          text: "*Overall Risk Assessment:*",
+        },
+        {
+          type: "mrkdwn",
+          text: `${getRiskLevelEmoji(risk.TotalPoints)} ${getRiskLevel(risk.TotalPoints)} (${risk.TotalPoints || 0} pts)`,
+        },
+      ],
     },
     { type: "divider" },
   ];
 
   // Risk categories - compact summary (details available in Step 2)
   const categories = ["Authority", "Insurance", "Operation", "Safety", "Other"];
-  const riskLines = categories
+  const riskFields = categories
     .filter((category) => risk[category])
     .map((category) => {
       const categoryData = risk[category];
       const infractionCount = categoryData.Infractions?.length || 0;
       const countText = infractionCount > 0 ? ` (${infractionCount})` : "";
-      return `*${category}:* ${getRiskLevelEmoji(categoryData.TotalPoints)} ${getRiskLevel(categoryData.TotalPoints)} (${categoryData.TotalPoints || 0} pts)${countText}`;
+      return [
+        {
+          type: "mrkdwn",
+          text: `*${category}:*`,
+        },
+        {
+          type: "mrkdwn",
+          text: `${getRiskLevelEmoji(categoryData.TotalPoints)} ${getRiskLevel(categoryData.TotalPoints)} (${categoryData.TotalPoints || 0} pts)${countText}`,
+        },
+      ];
     })
-    .join("\n");
+    .flat();
 
-  blocks.push({
-    type: "section",
-    text: {
-      type: "mrkdwn",
-      text: riskLines || "No risk data available",
-    },
-  });
+  if (riskFields.length > 0) {
+    blocks.push({
+      type: "section",
+      fields: riskFields,
+    });
+  } else {
+    blocks.push({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: "No risk data available",
+      },
+    });
+  }
 
   // MyCarrierProtect section if applicable
   if (data.IsBlocked || data.FreightValidateStatus === "Review Recommended") {
@@ -429,13 +567,17 @@ function buildStep2View(wizardId, incidentReports = []) {
   const state = wizardState.get(wizardId);
   const { carrierData } = state;
   const risk = carrierData.RiskAssessmentDetails || {};
+  const companyName = normalizeNullableText(
+    carrierData.CompanyName,
+    "Unknown Carrier",
+  );
 
   const blocks = [
     {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*${carrierData.CompanyName || "Unknown Carrier"}* - Detailed Risk Information`,
+        text: `*${companyName}* - Detailed Risk Information`,
       },
     },
     { type: "divider" },
@@ -452,12 +594,20 @@ function buildStep2View(wizardId, incidentReports = []) {
 
   if (incidentReports && incidentReports.length > 0) {
     incidentReports.slice(0, 5).forEach((report) => {
+      const incidentType = normalizeNullableText(
+        report.IncidentType || report.Type,
+        "Incident",
+      );
+      const incidentDetails = normalizeNullableText(
+        report.Description || report.Details,
+        "No details",
+      );
       blocks.push({
         type: "context",
         elements: [
           {
             type: "mrkdwn",
-            text: `- ${report.IncidentType || report.Type || "Incident"}: ${report.Description || report.Details || "No details"}`,
+            text: `- ${incidentType}: ${incidentDetails}`,
           },
         ],
       });
@@ -492,15 +642,26 @@ function buildStep2View(wizardId, incidentReports = []) {
   categories.forEach((category) => {
     const categoryData = risk[category];
     if (categoryData?.Infractions?.length > 0) {
-      const infractionText = categoryData.Infractions.map(
-        (i) => `  - ${i.RuleText}: ${i.RuleOutput} (${i.Points} pts)`,
-      ).join("\n");
+      const infractionLines = categoryData.Infractions.map(
+        formatInfractionLine,
+      ).filter(Boolean);
       blocks.push({
         type: "section",
         text: {
           type: "mrkdwn",
-          text: `*${category}:*\n${infractionText}`,
+          text: `*${category}:*`,
         },
+      });
+      chunkLines(infractionLines).forEach((chunk) => {
+        blocks.push({
+          type: "context",
+          elements: [
+            {
+              type: "mrkdwn",
+              text: chunk.join("\n"),
+            },
+          ],
+        });
       });
     }
   });
@@ -543,53 +704,94 @@ function buildStep2View(wizardId, incidentReports = []) {
 }
 
 // Build Step 3: Vehicle Information modal
-function buildStep3View(wizardId, vinVerifications = []) {
+function buildStep3View(wizardId, options = {}) {
   const state = wizardState.get(wizardId);
+  if (!state) {
+    return buildSessionExpiredView("Vehicles");
+  }
   const { carrierData } = state;
+  const companyName = normalizeNullableText(
+    carrierData.CompanyName,
+    "Unknown Carrier",
+  );
+  const vinVerifications =
+    options.vinVerifications || state.vinVerifications || [];
+  const pageSize = options.pageSize ?? state.vinPageSize ?? VIN_PAGE_SIZE;
+  const totalCount = vinVerifications.length;
+  const totalPages = totalCount > 0 ? Math.ceil(totalCount / pageSize) : 0;
+  const requestedPage = options.page ?? state.vinPage ?? 0;
+  const page =
+    totalPages > 0
+      ? Math.min(Math.max(requestedPage, 0), totalPages - 1)
+      : 0;
+
+  state.vinPage = page;
+  state.vinPageSize = pageSize;
 
   const blocks = [
     {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*${carrierData.CompanyName || "Unknown Carrier"}* - Vehicle Information`,
+        text: `*${companyName}* - Vehicle Information`,
       },
     },
     { type: "divider" },
   ];
 
   if (vinVerifications && vinVerifications.length > 0) {
+    const pageLabel =
+      totalPages > 1 ? ` (Page ${page + 1}/${totalPages})` : "";
     blocks.push({
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*Verified Vehicles:* ${vinVerifications.length} total`,
+        text: `*Verified Vehicles:* ${vinVerifications.length} total${pageLabel}`,
       },
     });
 
-    vinVerifications.slice(0, 10).forEach((vin) => {
-      const status = vin.VINVerificationStatus?.Description || "Unknown";
+    const startIndex = page * pageSize;
+    const pageItems = vinVerifications.slice(startIndex, startIndex + pageSize);
+    pageItems.forEach((vin) => {
+      const status = normalizeNullableText(
+        vin.VINVerificationStatus?.Description,
+        "Unknown",
+      );
+      const vinValue = normalizeNullableText(vin.VIN, "N/A");
       blocks.push({
         type: "context",
         elements: [
           {
             type: "mrkdwn",
-            text: `VIN: \`${vin.VIN || "N/A"}\` | Status: ${status}`,
+            text: `VIN: \`${vinValue}\` | Status: ${status}`,
           },
         ],
       });
     });
 
-    if (vinVerifications.length > 10) {
-      blocks.push({
-        type: "context",
-        elements: [
-          {
-            type: "mrkdwn",
-            text: `...and ${vinVerifications.length - 10} more vehicles`,
-          },
-        ],
-      });
+    if (totalPages > 1) {
+      const paginationElements = [];
+      if (page > 0) {
+        paginationElements.push({
+          type: "button",
+          text: { type: "plain_text", text: "← Prev", emoji: true },
+          action_id: "wizard_vins_prev",
+        });
+      }
+      if (page < totalPages - 1) {
+        paginationElements.push({
+          type: "button",
+          text: { type: "plain_text", text: "Next →", emoji: true },
+          action_id: "wizard_vins_next",
+        });
+      }
+      if (paginationElements.length > 0) {
+        blocks.push({
+          type: "actions",
+          block_id: "vin_pagination",
+          elements: paginationElements,
+        });
+      }
     }
   } else {
     blocks.push({
@@ -632,7 +834,12 @@ function buildStep3View(wizardId, vinVerifications = []) {
     type: "modal",
     callback_id: "carrier_wizard",
     notify_on_close: true,
-    private_metadata: JSON.stringify({ wizardId, step: 3 }),
+    private_metadata: JSON.stringify({
+      wizardId,
+      step: 3,
+      vinPage: page,
+      vinPageSize: pageSize,
+    }),
     title: { type: "plain_text", text: "Vehicles", emoji: true },
     blocks,
   };
@@ -642,13 +849,17 @@ function buildStep3View(wizardId, vinVerifications = []) {
 function buildStep4View(wizardId, contacts = []) {
   const state = wizardState.get(wizardId);
   const { carrierData } = state;
+  const companyName = normalizeNullableText(
+    carrierData.CompanyName,
+    "Unknown Carrier",
+  );
 
   const blocks = [
     {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*${carrierData.CompanyName || "Unknown Carrier"}* - Send Intellivite`,
+        text: `*${companyName}* - Send Intellivite`,
       },
     },
     { type: "divider" },
@@ -657,18 +868,23 @@ function buildStep4View(wizardId, contacts = []) {
   // Contact selection - API returns FirstName, LastName, Email
   const contactOptions = (contacts || [])
     .slice(0, 10)
-    .filter((c) => c.Email)
+    .filter((c) => normalizeNullableText(c.Email, ""))
     .map((contact) => {
-      const name =
-        contact.FirstName && contact.LastName
-          ? `${contact.FirstName} ${contact.LastName}`
-          : contact.Name || contact.ContactName || "Unknown";
+      const firstName = normalizeNullableText(contact.FirstName, "");
+      const lastName = normalizeNullableText(contact.LastName, "");
+      const fullName = [firstName, lastName].filter(Boolean).join(" ");
+      const fallbackName = normalizeNullableText(
+        contact.Name || contact.ContactName,
+        "Unknown",
+      );
+      const name = fullName || fallbackName;
+      const email = normalizeNullableText(contact.Email, "");
       return {
         text: {
           type: "plain_text",
-          text: `${name} - ${contact.Email}`,
+          text: `${name} - ${email}`,
         },
-        value: contact.Email,
+        value: email,
       };
     });
 
@@ -911,7 +1127,14 @@ slackApp.action("wizard_next", async ({ ack, body, client }) => {
     const vinVerifications = vinResult.success
       ? vinResult.data?.VINVerifications || []
       : [];
-    newView = buildStep3View(wizardId, vinVerifications);
+    state.vinVerifications = vinVerifications;
+    state.vinPage = 0;
+    state.vinPageSize = VIN_PAGE_SIZE;
+    newView = buildStep3View(wizardId, {
+      vinVerifications,
+      page: 0,
+      pageSize: VIN_PAGE_SIZE,
+    });
   } else if (step === 3) {
     // Moving to Step 4 - fetch contacts
     const contactsResult = await fetchCarrierContacts(mcNumber);
@@ -942,6 +1165,18 @@ slackApp.action("wizard_back", async ({ ack, body, client }) => {
 
   const { wizardId, step } = JSON.parse(body.view.private_metadata);
   const state = wizardState.get(wizardId);
+  if (!state) {
+    logger.warn({ wizardId, step }, "Wizard state missing on back action");
+    try {
+      await client.views.update({
+        view_id: body.view.id,
+        view: buildSessionExpiredView(),
+      });
+    } catch (error) {
+      logger.error({ err: error }, "Failed to show session expired view");
+    }
+    return;
+  }
   const { mcNumber, channelId, carrierData } = state;
   const userId = body.user.id;
 
@@ -969,6 +1204,97 @@ slackApp.action("wizard_back", async ({ ack, body, client }) => {
   }
 });
 
+// Handle VIN pagination - Next
+slackApp.action("wizard_vins_next", async ({ ack, body, client }) => {
+  await ack();
+
+  const metadata = JSON.parse(body.view.private_metadata || "{}");
+  const { wizardId, vinPage = 0, vinPageSize = VIN_PAGE_SIZE } = metadata;
+  const state = wizardState.get(wizardId);
+
+  if (!state || !Array.isArray(state.vinVerifications)) {
+    logger.warn({ wizardId }, "VIN pagination requested without session");
+    try {
+      await client.views.update({
+        view_id: body.view.id,
+        view: buildSessionExpiredView("Vehicles"),
+      });
+    } catch (error) {
+      logger.error({ err: error }, "Failed to show session expired view");
+    }
+    return;
+  }
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(state.vinVerifications.length / vinPageSize),
+  );
+  const nextPage = Math.min(vinPage + 1, totalPages - 1);
+  state.vinPage = nextPage;
+  state.vinPageSize = vinPageSize;
+
+  const newView = buildStep3View(wizardId, {
+    vinVerifications: state.vinVerifications,
+    page: nextPage,
+    pageSize: vinPageSize,
+  });
+
+  try {
+    await client.views.update({
+      view_id: body.view.id,
+      view: newView,
+    });
+  } catch (error) {
+    logger.error({ err: error }, "Failed to update VIN pagination view");
+  }
+});
+
+// Handle VIN pagination - Prev
+slackApp.action("wizard_vins_prev", async ({ ack, body, client }) => {
+  await ack();
+
+  const metadata = JSON.parse(body.view.private_metadata || "{}");
+  const { wizardId, vinPage = 0, vinPageSize = VIN_PAGE_SIZE } = metadata;
+  const state = wizardState.get(wizardId);
+
+  if (!state || !Array.isArray(state.vinVerifications)) {
+    logger.warn({ wizardId }, "VIN pagination requested without session");
+    try {
+      await client.views.update({
+        view_id: body.view.id,
+        view: buildSessionExpiredView("Vehicles"),
+      });
+    } catch (error) {
+      logger.error({ err: error }, "Failed to show session expired view");
+    }
+    return;
+  }
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(state.vinVerifications.length / vinPageSize),
+  );
+  const prevPage = Math.max(vinPage - 1, 0);
+  const clampedPage = Math.min(prevPage, totalPages - 1);
+  state.vinPage = clampedPage;
+  state.vinPageSize = vinPageSize;
+
+  const newView = buildStep3View(wizardId, {
+    vinVerifications: state.vinVerifications,
+    page: clampedPage,
+    pageSize: vinPageSize,
+  });
+
+  try {
+    await client.views.update({
+      view_id: body.view.id,
+      view: newView,
+    });
+  } catch (error) {
+    logger.error({ err: error }, "Failed to update VIN pagination view");
+  }
+});
+
 // Handle wizard decline
 slackApp.action("wizard_decline", async ({ ack, body, client }) => {
   await ack();
@@ -993,7 +1319,10 @@ slackApp.action("wizard_decline", async ({ ack, body, client }) => {
 
   // Post decline message to channel
   try {
-    const carrierName = carrierData?.CompanyName || "Unknown Carrier";
+    const carrierName = normalizeNullableText(
+      carrierData?.CompanyName,
+      "Unknown Carrier",
+    );
     await client.chat.postMessage({
       channel: channelId,
       text: `<@${userId}> voted no on ${carrierName} (MC${mcNumber})`,
@@ -1127,11 +1456,15 @@ slackApp.action("wizard_send_intellivite", async ({ ack, body, client }) => {
   clearActiveAssessment(channelId);
 
   // Post success message to channel
-  const carrierName = carrierData?.CompanyName || "Unknown Carrier";
+  const carrierName = normalizeNullableText(
+    carrierData?.CompanyName,
+    "Unknown Carrier",
+  );
+  const safeEmail = normalizeNullableText(email, "unknown email");
   try {
     await client.chat.postMessage({
       channel: channelId,
-      text: `<@${userId}> invited ${carrierName} (MC${mcNumber}) via Intellivite\nContact: ${email}`,
+      text: `<@${userId}> invited ${carrierName} (MC${mcNumber}) via Intellivite\nContact: ${safeEmail}`,
     });
   } catch (error) {
     logger.error({ err: error }, "Failed to post success message");
@@ -1149,7 +1482,7 @@ slackApp.action("wizard_send_intellivite", async ({ ack, body, client }) => {
             type: "section",
             text: {
               type: "mrkdwn",
-              text: `Intellivite sent to ${email} for ${carrierName} (MC${mcNumber}).\n\nConfirmation posted to channel.`,
+              text: `Intellivite sent to ${safeEmail} for ${carrierName} (MC${mcNumber}).\n\nConfirmation posted to channel.`,
             },
           },
         ],
@@ -1245,11 +1578,15 @@ slackApp.view("carrier_wizard_step4", async ({ ack, body, view, client }) => {
   clearActiveAssessment(channelId);
 
   // Post success message to channel
-  const carrierName = carrierData?.CompanyName || "Unknown Carrier";
+  const carrierName = normalizeNullableText(
+    carrierData?.CompanyName,
+    "Unknown Carrier",
+  );
+  const safeEmail = normalizeNullableText(email, "unknown email");
   try {
     await client.chat.postMessage({
       channel: channelId,
-      text: `<@${userId}> invited ${carrierName} (MC${mcNumber}) via Intellivite\nContact: ${email}`,
+      text: `<@${userId}> invited ${carrierName} (MC${mcNumber}) via Intellivite\nContact: ${safeEmail}`,
     });
   } catch (error) {
     logger.error({ err: error }, "Failed to post success message");
