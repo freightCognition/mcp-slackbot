@@ -1809,7 +1809,7 @@ slackApp.action("wizard_send_intellivite", async ({ ack, body, client }) => {
 });
 
 // Handle modal close (user clicked X, pressed Escape, or switched away)
-slackApp.view("carrier_wizard", async ({ ack, body, view }) => {
+slackApp.view("carrier_wizard", async ({ ack }) => {
   // This handles view_submission - just acknowledge
   await ack();
 });
@@ -1926,7 +1926,7 @@ slackApp.view("carrier_wizard_step4", async ({ ack, body, view, client }) => {
 // Handle Step 4 modal close
 slackApp.view(
   { callback_id: "carrier_wizard_step4", type: "view_closed" },
-  async ({ ack, body, view }) => {
+  async ({ ack, view }) => {
     await ack();
 
     try {
@@ -1953,7 +1953,7 @@ slackApp.view(
 
 slackApp.view(
   { callback_id: "carrier_wizard", type: "view_closed" },
-  async ({ ack, body, view }) => {
+  async ({ ack, view }) => {
     await ack();
 
     try {
