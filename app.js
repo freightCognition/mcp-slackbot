@@ -372,6 +372,26 @@ function generateWizardId() {
   return `wiz_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
+function buildLoadingView(mcNumber) {
+  return {
+    type: "modal",
+    callback_id: "carrier_wizard_loading",
+    notify_on_close: true,
+    private_metadata: JSON.stringify({ mcNumber }),
+    title: { type: "plain_text", text: "Carrier Assessment", emoji: true },
+    close: { type: "plain_text", text: "Cancel", emoji: true },
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `:hourglass_flowing_sand: Loading carrier data for MC${mcNumber}...`,
+        },
+      },
+    ],
+  };
+}
+
 function buildSessionExpiredView(titleText = "Session expired") {
   return {
     type: "modal",
@@ -1167,18 +1187,43 @@ slackApp.command("/mcp", async ({ command, ack, respond, client }) => {
 
   logger.info({ mcNumber, userId: user_id }, "Starting carrier wizard");
 
+  // Open loading modal immediately for responsive UX
+  let loadingViewId;
+  try {
+    const loadingResult = await client.views.open({
+      trigger_id,
+      view: buildLoadingView(mcNumber),
+    });
+    loadingViewId = loadingResult.view.id;
+    setActiveAssessment(channel_id, user_id, mcNumber);
+  } catch (error) {
+    logger.error({ err: error, mcNumber }, "Failed to open loading modal");
+    await respond({
+      text: "Failed to open carrier assessment. Please try again.",
+      response_type: "ephemeral",
+    });
+    return;
+  }
+
   // Fetch carrier data using GetCarrierData endpoint
   const result = await fetchCarrierData(mcNumber);
 
   if (!result.success) {
-    let errorMessage = "Error fetching carrier data. Please try again later.";
+    let errorMessage =
+      "Error fetching carrier data. Please close this modal and try again.";
     if (result.error === "not_found") {
       errorMessage = `Carrier MC${mcNumber} not found in MCP database.`;
     } else if (result.error === "api_error") {
       errorMessage =
-        "An API error occurred. Please try again or contact your administrator.";
+        "An API error occurred. Please close this modal and try again.";
       logger.error({ message: result.message }, "API error details");
     }
+    clearActiveAssessment(channel_id);
+    await client.views.update({
+      view_id: loadingViewId,
+      view: buildSessionExpiredView("Error"),
+    });
+    // Also send ephemeral so user sees the specific error
     await respond({ text: errorMessage, response_type: "ephemeral" });
     return;
   }
@@ -1188,6 +1233,11 @@ slackApp.command("/mcp", async ({ command, ack, respond, client }) => {
     !carrierData ||
     (Array.isArray(carrierData) && carrierData.length === 0)
   ) {
+    clearActiveAssessment(channel_id);
+    await client.views.update({
+      view_id: loadingViewId,
+      view: buildSessionExpiredView("No Data"),
+    });
     await respond({
       text: "No data found for the provided MC number.",
       response_type: "ephemeral",
@@ -1195,51 +1245,51 @@ slackApp.command("/mcp", async ({ command, ack, respond, client }) => {
     return;
   }
 
-  // Post assessment summary to channel for team visibility
-  try {
-    const assessmentBlocks = buildChannelAssessmentBlocks(
-      carrierData,
-      mcNumber,
-      user_id,
-    );
-    const data = Array.isArray(carrierData) ? carrierData[0] : carrierData;
-    const carrierName = normalizeNullableText(
-      data.CompanyName,
-      "Unknown Carrier",
-    );
-    const risk = data.RiskAssessmentDetails || {};
-    const totalPoints = risk.TotalPoints || 0;
-    await client.chat.postMessage({
-      channel: channel_id,
-      text: `<@${user_id}> is reviewing ${carrierName} (MC${mcNumber}) - ${getRiskLevelEmoji(totalPoints)} ${getRiskLevel(totalPoints)}`,
-      blocks: assessmentBlocks,
-    });
-  } catch (error) {
-    logger.error(
-      { err: error, mcNumber },
-      "Failed to post assessment channel message",
-    );
-    // Non-fatal: continue opening modal even if channel message fails
-  }
-
-  // Build and open Step 1 modal
+  // Post channel message and update modal in parallel
   const view = buildStep1View(carrierData, mcNumber, channel_id);
 
-  try {
-    await client.views.open({
-      trigger_id,
-      view,
-    });
-    // Mark assessment as active for this channel
-    setActiveAssessment(channel_id, user_id, mcNumber);
-    logger.info({ mcNumber, userId: user_id }, "Opened carrier wizard modal");
-  } catch (error) {
-    logger.error({ err: error, mcNumber }, "Failed to open modal");
-    await respond({
-      text: "Failed to open carrier assessment. Please try again.",
-      response_type: "ephemeral",
-    });
-  }
+  const channelMessagePromise = (async () => {
+    try {
+      const assessmentBlocks = buildChannelAssessmentBlocks(
+        carrierData,
+        mcNumber,
+        user_id,
+      );
+      const data = Array.isArray(carrierData) ? carrierData[0] : carrierData;
+      const carrierName = normalizeNullableText(
+        data.CompanyName,
+        "Unknown Carrier",
+      );
+      const risk = data.RiskAssessmentDetails || {};
+      const totalPoints = risk.TotalPoints || 0;
+      await client.chat.postMessage({
+        channel: channel_id,
+        text: `<@${user_id}> is reviewing ${carrierName} (MC${mcNumber}) - ${getRiskLevelEmoji(totalPoints)} ${getRiskLevel(totalPoints)}`,
+        blocks: assessmentBlocks,
+      });
+    } catch (error) {
+      logger.error(
+        { err: error, mcNumber },
+        "Failed to post assessment channel message",
+      );
+      // Non-fatal: modal update continues regardless
+    }
+  })();
+
+  const modalUpdatePromise = (async () => {
+    try {
+      await client.views.update({
+        view_id: loadingViewId,
+        view,
+      });
+      logger.info({ mcNumber, userId: user_id }, "Opened carrier wizard modal");
+    } catch (error) {
+      logger.error({ err: error, mcNumber }, "Failed to update modal");
+      clearActiveAssessment(channel_id);
+    }
+  })();
+
+  await Promise.all([channelMessagePromise, modalUpdatePromise]);
 });
 
 // Handle wizard navigation - Next button
@@ -1520,6 +1570,7 @@ slackApp.action("wizard_decline", async ({ ack, body, client }) => {
 
   // Clear active assessment and wizard state
   clearActiveAssessment(channelId);
+  wizardState.delete(`${wizardId}_selected_email`);
   wizardState.delete(wizardId);
 
   // Log to audit
@@ -1897,12 +1948,28 @@ slackApp.view(
           const { channelId } = state;
           // Clean up
           clearActiveAssessment(channelId);
+          wizardState.delete(`${wizardId}_selected_email`);
           wizardState.delete(wizardId);
           logger.info({ wizardId }, "Wizard closed, cleaned up state");
         }
       }
     } catch (error) {
       logger.error({ err: error }, "Error handling view close");
+    }
+  },
+);
+
+slackApp.view(
+  { callback_id: "carrier_wizard_loading", type: "view_closed" },
+  async ({ ack, view }) => {
+    await ack();
+
+    try {
+      const metadata = JSON.parse(view.private_metadata || "{}");
+      const { mcNumber } = metadata;
+      logger.info({ mcNumber }, "Loading modal closed by user");
+    } catch (error) {
+      logger.error({ err: error }, "Error handling loading view close");
     }
   },
 );
