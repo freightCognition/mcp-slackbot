@@ -105,6 +105,14 @@ async function loadTokens() {
   }
 }
 
+// Redact email for logging — preserves first char and domain for debugging
+function redactEmail(email) {
+  if (!email || typeof email !== "string") return "[no-email]";
+  const parts = email.split("@");
+  if (parts.length !== 2) return "[invalid-email]";
+  return `${parts[0][0]}***@${parts[1]}`;
+}
+
 function getRiskLevelEmoji(points) {
   if (points >= 0 && points <= 124) {
     return "🟢";
@@ -248,13 +256,16 @@ async function apiCall(endpoint, params = {}, method = "POST") {
       };
 
       if (method === "POST") {
-        config.params = params;
+        config.data = params;
       } else {
         config.params = params;
       }
 
+      const logParams = params.carrierEmail
+        ? { ...params, carrierEmail: redactEmail(params.carrierEmail) }
+        : params;
       logger.info(
-        { endpoint, params, attempt: attempt + 1 },
+        { endpoint, params: logParams, attempt: attempt + 1 },
         "Making API call",
       );
       const response = await axios(config);
@@ -1165,11 +1176,11 @@ slackApp.command("/mcp", async ({ command, ack, respond, client }) => {
     return;
   }
 
-  const mcNumber = text.trim();
+  const mcNumber = text.trim().replace(/^mc/i, "");
 
   if (!/^\d{1,8}$/.test(mcNumber)) {
     await respond({
-      text: "Please provide a valid MC/DOT number (1-8 digits).",
+      text: "Please provide a valid MC number (e.g., 123456 or MC123456).",
       response_type: "ephemeral",
     });
     return;
@@ -1706,13 +1717,16 @@ slackApp.action("wizard_send_intellivite", async ({ ack, body, client }) => {
     return;
   }
 
-  logger.info({ mcNumber, email, userId }, "Sending Intellivite");
+  logger.info(
+    { mcNumber, email: redactEmail(email), userId },
+    "Sending Intellivite",
+  );
 
   const result = await sendIntellivite(mcNumber, email);
 
   if (!result.success) {
     logger.error(
-      { err: result.message, mcNumber, email },
+      { err: result.message, mcNumber, email: redactEmail(email) },
       "Failed to send Intellivite",
     );
     try {
@@ -1853,7 +1867,7 @@ slackApp.view("carrier_wizard_step4", async ({ ack, body, view, client }) => {
   await ack();
 
   logger.info(
-    { mcNumber, email, userId },
+    { mcNumber, email: redactEmail(email), userId },
     "Sending Intellivite via form submit",
   );
 
@@ -1861,7 +1875,7 @@ slackApp.view("carrier_wizard_step4", async ({ ack, body, view, client }) => {
 
   if (!result.success) {
     logger.error(
-      { err: result.message, mcNumber, email },
+      { err: result.message, mcNumber, email: redactEmail(email) },
       "Failed to send Intellivite",
     );
     try {
