@@ -967,12 +967,14 @@ function buildStep4View(wizardId, contacts = [], options = {}) {
       );
       const name = fullName || fallbackName;
       const email = normalizeNullableText(contact.Email, "");
+      const label = `${name} - ${email}`.slice(0, 75);
+      const safeValue = email.slice(0, 75);
       return {
         text: {
           type: "plain_text",
-          text: `${name} - ${email}`,
+          text: label,
         },
-        value: email,
+        value: safeValue,
       };
     });
 
