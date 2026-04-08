@@ -650,10 +650,13 @@ function buildStep1View(carrierData, mcNumber, channelId, wizardId = null) {
 }
 
 // Build Step 2: Detailed Risk Information modal
-function buildStep2View(wizardId, incidentReports = [], options = {}) {
+function buildStep2View(wizardId, incidentReports, options = {}) {
   const state = wizardState.get(wizardId);
   if (!state) {
     return buildSessionExpiredView("Risk Details");
+  }
+  if (!incidentReports) {
+    incidentReports = state.incidentReports || [];
   }
   const { carrierData } = state;
   const risk = carrierData.RiskAssessmentDetails || {};
@@ -1351,6 +1354,7 @@ slackApp.action("wizard_next", async ({ ack, body, client }) => {
     const incidentReports = incidentResult.success
       ? incidentResult.data?.IncidentReports || []
       : [];
+    state.incidentReports = incidentReports;
     newView = buildStep2View(wizardId, incidentReports, { loadError });
   } else if (step === 2) {
     const vinResult = await fetchCarrierVINVerifications(mcNumber);
