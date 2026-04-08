@@ -1869,7 +1869,7 @@ slackApp.view(
           // Clean up
           clearActiveAssessment(channelId);
           wizardState.delete(wizardId);
-          const stateKey = `${body.user.id}_selected_email`;
+          const stateKey = `${wizardId}_selected_email`;
           wizardState.delete(stateKey);
           logger.info({ wizardId }, "Step 4 wizard closed, cleaned up state");
         }
