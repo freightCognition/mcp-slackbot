@@ -1278,6 +1278,7 @@ slackApp.command("/mcp", async ({ command, ack, respond, client }) => {
       const totalPoints = risk.TotalPoints || 0;
       await respond({
         response_type: "in_channel",
+        replace_original: false,
         text: `<@${user_id}> is reviewing ${carrierName} (MC${mcNumber}) - ${getRiskLevelEmoji(totalPoints)} ${getRiskLevel(totalPoints)}`,
         blocks: assessmentBlocks,
       });
