@@ -1,0 +1,61 @@
+[
+  {
+    "CompanyName": "RISKY FREIGHT INC",
+    "DotNumber": "999999",
+    "DocketNumber": "MC555555",
+    "IsBlocked": true,
+    "FreightValidateStatus": "Review Recommended",
+    "RiskAssessmentDetails": {
+      "TotalPoints": 3500,
+      "Authority": {
+        "TotalPoints": 1000,
+        "Infractions": [
+          {
+            "RuleText": "Freight Forwarder authority active",
+            "RuleOutput": null,
+            "Points": 1000
+          }
+        ]
+      },
+      "Insurance": {
+        "TotalPoints": 1000,
+        "Infractions": [
+          {
+            "RuleText": "Cargo insurance deductible exceeds limit",
+            "RuleOutput": "Deductible is $50,000",
+            "Points": 1000
+          }
+        ]
+      },
+      "Operation": {
+        "TotalPoints": 0,
+        "Infractions": []
+      },
+      "Safety": {
+        "TotalPoints": 500,
+        "Infractions": [
+          {
+            "RuleText": "Multiple safety violations",
+            "RuleOutput": "Carrier has 50 violations",
+            "Points": 250
+          },
+          {
+            "RuleText": "Unsafe Driving",
+            "RuleOutput": null,
+            "Points": 250
+          }
+        ]
+      },
+      "Other": {
+        "TotalPoints": 1000,
+        "Infractions": [
+          {
+            "RuleText": "Carrier blocked by 3 or more companies",
+            "RuleOutput": "Blocked by 5 companies",
+            "Points": 1000
+          }
+        ]
+      }
+    }
+  }
+]
