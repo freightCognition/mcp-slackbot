@@ -325,8 +325,9 @@ async function fetchCarrierData(mcNumber) {
     State: profile?.Identity?.businessState || "N/A",
     AuthorityStatus: profile?.Authority?.commonAuthority || "N/A",
     AuthGrantDate: profile?.Authority?.authGrantDate || "N/A",
-    IsBlocked: profile?.isBlocked || false,
+    IsBlocked: profile?.isBlocked || riskData?.IsBlocked || false,
     IsMonitored: profile?.isMonitored || false,
+    FreightValidateStatus: riskData?.FreightValidateStatus || null,
     // From GetCarrierRiskAssessment
     RiskAssessmentDetails: riskData?.RiskAssessmentDetails || null,
     // Raw data for later steps
