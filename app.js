@@ -389,6 +389,68 @@ function buildSessionExpiredView(titleText = "Session expired") {
   };
 }
 
+// Build Block Kit blocks for channel broadcast when assessment starts
+function buildChannelAssessmentBlocks(carrierData, mcNumber, userId) {
+  const data = Array.isArray(carrierData) ? carrierData[0] : carrierData;
+  const risk = data.RiskAssessmentDetails || {};
+  const companyName = normalizeNullableText(
+    data.CompanyName,
+    "Unknown Carrier",
+  );
+  const dotNumber = normalizeNullableText(data.DotNumber, "N/A");
+  const docketNumber = normalizeNullableText(data.DocketNumber, "N/A");
+  const trucksTotal = normalizeNullableText(data.TrucksTotal, "N/A");
+  const driversTotal = normalizeNullableText(data.DriversTotal, "N/A");
+
+  const totalPoints = risk.TotalPoints || 0;
+  const overallEmoji = getRiskLevelEmoji(totalPoints);
+  const overallLevel = getRiskLevel(totalPoints);
+
+  const categories = ["Authority", "Insurance", "Operation", "Safety", "Other"];
+  const categoryLine = categories
+    .filter((cat) => risk[cat])
+    .map((cat) => {
+      const pts = risk[cat].TotalPoints || 0;
+      return `${cat} ${getRiskLevelEmoji(pts)} ${pts}`;
+    })
+    .join("  ·  ");
+
+  return [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `<@${userId}> is reviewing *${companyName}*`,
+      },
+    },
+    {
+      type: "section",
+      fields: [
+        { type: "mrkdwn", text: `*MC:* ${docketNumber}` },
+        { type: "mrkdwn", text: `*DOT:* ${dotNumber}` },
+        { type: "mrkdwn", text: `*Trucks:* ${trucksTotal}` },
+        { type: "mrkdwn", text: `*Drivers:* ${driversTotal}` },
+      ],
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `${overallEmoji} *Risk Assessment: ${overallLevel}* (${totalPoints} pts)`,
+      },
+    },
+    {
+      type: "context",
+      elements: [
+        {
+          type: "mrkdwn",
+          text: categoryLine || "No risk data available",
+        },
+      ],
+    },
+  ];
+}
+
 // Build Step 1: Assessment Overview modal
 function buildStep1View(carrierData, mcNumber, channelId, wizardId = null) {
   const data = Array.isArray(carrierData) ? carrierData[0] : carrierData;
@@ -1128,6 +1190,33 @@ slackApp.command("/mcp", async ({ command, ack, respond, client }) => {
       response_type: "ephemeral",
     });
     return;
+  }
+
+  // Post assessment summary to channel for team visibility
+  try {
+    const assessmentBlocks = buildChannelAssessmentBlocks(
+      carrierData,
+      mcNumber,
+      user_id,
+    );
+    const data = Array.isArray(carrierData) ? carrierData[0] : carrierData;
+    const carrierName = normalizeNullableText(
+      data.CompanyName,
+      "Unknown Carrier",
+    );
+    const risk = data.RiskAssessmentDetails || {};
+    const totalPoints = risk.TotalPoints || 0;
+    await client.chat.postMessage({
+      channel: channel_id,
+      text: `<@${user_id}> is reviewing ${carrierName} (MC${mcNumber}) - ${getRiskLevelEmoji(totalPoints)} ${getRiskLevel(totalPoints)}`,
+      blocks: assessmentBlocks,
+    });
+  } catch (error) {
+    logger.error(
+      { err: error, mcNumber },
+      "Failed to post assessment channel message",
+    );
+    // Non-fatal: continue opening modal even if channel message fails
   }
 
   // Build and open Step 1 modal
@@ -1872,6 +1961,7 @@ if (typeof module !== "undefined") {
     clearActiveAssessment,
     generateWizardId,
     buildSessionExpiredView,
+    buildChannelAssessmentBlocks,
     buildStep1View,
     buildStep2View,
     buildStep3View,
