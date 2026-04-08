@@ -11,7 +11,7 @@
     "pm2:restart": "pm2 restart mcp-slackbot",
     "pm2:logs": "pm2 logs mcp-slackbot",
     "pm2:status": "pm2 status",
-    "test": "bun tests/test_preview.js && bun tests/test_refresh.js && bun tests/test_token.js",
+    "test": "bun test tests/app.test.js",
     "test:token": "bun tests/test_token.js",
     "test:refresh": "bun tests/test_refresh.js",
     "lint": "eslint .",

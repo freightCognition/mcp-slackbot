@@ -61,6 +61,11 @@ async function saveTokens(bearerToken, refreshToken) {
 
 // Log audit entry for carrier wizard actions
 async function logAuditEntry(slackUserId, mcNumber, action) {
+  if (!slackUserId || !mcNumber || !action) {
+    throw new Error(
+      `logAuditEntry: missing required params - slackUserId=${slackUserId}, mcNumber=${mcNumber}, action=${action}`,
+    );
+  }
   await db.execute({
     sql: `INSERT INTO audit_log (slack_user_id, mc_number, action) VALUES (?, ?, ?)`,
     args: [slackUserId, mcNumber, action],

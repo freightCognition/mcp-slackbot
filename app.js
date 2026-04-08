@@ -385,16 +385,6 @@ function buildSessionExpiredView(titleText = "Session expired") {
           text: "Session expired. Please start a new assessment.",
         },
       },
-      {
-        type: "actions",
-        elements: [
-          {
-            type: "button",
-            text: { type: "plain_text", text: "← Back", emoji: true },
-            action_id: "wizard_back",
-          },
-        ],
-      },
     ],
   };
 }
@@ -566,8 +556,11 @@ function buildStep1View(carrierData, mcNumber, channelId, wizardId = null) {
 }
 
 // Build Step 2: Detailed Risk Information modal
-function buildStep2View(wizardId, incidentReports = []) {
+function buildStep2View(wizardId, incidentReports = [], options = {}) {
   const state = wizardState.get(wizardId);
+  if (!state) {
+    return buildSessionExpiredView("Risk Details");
+  }
   const { carrierData } = state;
   const risk = carrierData.RiskAssessmentDetails || {};
   const companyName = normalizeNullableText(
@@ -585,6 +578,16 @@ function buildStep2View(wizardId, incidentReports = []) {
     },
     { type: "divider" },
   ];
+
+  if (options.loadError) {
+    blocks.push({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: ":warning: *Some data could not be loaded. Results may be incomplete.*",
+      },
+    });
+  }
 
   // Incident reports section
   blocks.push({
@@ -739,6 +742,16 @@ function buildStep3View(wizardId, options = {}) {
     { type: "divider" },
   ];
 
+  if (options.loadError) {
+    blocks.push({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: ":warning: *Some data could not be loaded. Results may be incomplete.*",
+      },
+    });
+  }
+
   if (vinVerifications && vinVerifications.length > 0) {
     const pageLabel = totalPages > 1 ? ` (Page ${page + 1}/${totalPages})` : "";
     blocks.push({
@@ -845,8 +858,11 @@ function buildStep3View(wizardId, options = {}) {
 }
 
 // Build Step 4: Contacts & Intellivite modal
-function buildStep4View(wizardId, contacts = []) {
+function buildStep4View(wizardId, contacts = [], options = {}) {
   const state = wizardState.get(wizardId);
+  if (!state) {
+    return buildSessionExpiredView("Contacts");
+  }
   const { carrierData } = state;
   const companyName = normalizeNullableText(
     carrierData.CompanyName,
@@ -863,6 +879,16 @@ function buildStep4View(wizardId, contacts = []) {
     },
     { type: "divider" },
   ];
+
+  if (options.loadError) {
+    blocks.push({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: ":warning: *Some data could not be loaded. Results may be incomplete.*",
+      },
+    });
+  }
 
   // Contact selection - API returns FirstName, LastName, Email
   const contactOptions = (contacts || [])
@@ -957,8 +983,22 @@ function buildStep4View(wizardId, contacts = []) {
   };
 }
 
-// Function to refresh the access token
+let refreshPromise = null;
+
 async function refreshAccessToken() {
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  refreshPromise = _doRefreshAccessToken();
+  try {
+    return await refreshPromise;
+  } finally {
+    refreshPromise = null;
+  }
+}
+
+async function _doRefreshAccessToken() {
   logger.info("Attempting to refresh access token...");
   try {
     const data = qs.stringify({
@@ -1042,6 +1082,14 @@ slackApp.command("/mcp", async ({ command, ack, respond, client }) => {
 
   const mcNumber = text.trim();
 
+  if (!/^\d{1,8}$/.test(mcNumber)) {
+    await respond({
+      text: "Please provide a valid MC/DOT number (1-8 digits).",
+      response_type: "ephemeral",
+    });
+    return;
+  }
+
   // Check for concurrent assessment in this channel
   if (hasActiveAssessment(channel_id)) {
     const active = activeAssessments.get(channel_id);
@@ -1062,7 +1110,9 @@ slackApp.command("/mcp", async ({ command, ack, respond, client }) => {
     if (result.error === "not_found") {
       errorMessage = `Carrier MC${mcNumber} not found in MCP database.`;
     } else if (result.error === "api_error") {
-      errorMessage = `MCP API error: ${result.message}`;
+      errorMessage =
+        "An API error occurred. Please try again or contact your administrator.";
+      logger.error({ message: result.message }, "API error details");
     }
     await respond({ text: errorMessage, response_type: "ephemeral" });
     return;
@@ -1104,8 +1154,31 @@ slackApp.command("/mcp", async ({ command, ack, respond, client }) => {
 slackApp.action("wizard_next", async ({ ack, body, client }) => {
   await ack();
 
-  const { wizardId, step } = JSON.parse(body.view.private_metadata);
+  let wizardId, step;
+  try {
+    ({ wizardId, step } = JSON.parse(body.view.private_metadata));
+  } catch (parseError) {
+    logger.warn(
+      { err: parseError },
+      "Failed to parse private_metadata in wizard_next",
+    );
+    return;
+  }
+
   const state = wizardState.get(wizardId);
+  if (!state) {
+    logger.warn({ wizardId, step }, "Wizard state missing on next action");
+    try {
+      await client.views.update({
+        view_id: body.view.id,
+        view: buildSessionExpiredView(),
+      });
+    } catch (error) {
+      logger.error({ err: error }, "Failed to show session expired view");
+    }
+    return;
+  }
+
   const { mcNumber } = state;
   const userId = body.user.id;
 
@@ -1114,15 +1187,27 @@ slackApp.action("wizard_next", async ({ ack, body, client }) => {
   let newView;
 
   if (step === 1) {
-    // Moving to Step 2 - fetch incident reports
     const incidentResult = await fetchCarrierIncidentReports(mcNumber);
+    const loadError = !incidentResult.success;
+    if (loadError) {
+      logger.warn(
+        { mcNumber },
+        "Failed to load incident reports for wizard step 2",
+      );
+    }
     const incidentReports = incidentResult.success
       ? incidentResult.data?.IncidentReports || []
       : [];
-    newView = buildStep2View(wizardId, incidentReports);
+    newView = buildStep2View(wizardId, incidentReports, { loadError });
   } else if (step === 2) {
-    // Moving to Step 3 - fetch VIN verifications
     const vinResult = await fetchCarrierVINVerifications(mcNumber);
+    const loadError = !vinResult.success;
+    if (loadError) {
+      logger.warn(
+        { mcNumber },
+        "Failed to load VIN verifications for wizard step 3",
+      );
+    }
     const vinVerifications = vinResult.success
       ? vinResult.data?.VINVerifications || []
       : [];
@@ -1133,14 +1218,18 @@ slackApp.action("wizard_next", async ({ ack, body, client }) => {
       vinVerifications,
       page: 0,
       pageSize: VIN_PAGE_SIZE,
+      loadError,
     });
   } else if (step === 3) {
-    // Moving to Step 4 - fetch contacts
     const contactsResult = await fetchCarrierContacts(mcNumber);
+    const loadError = !contactsResult.success;
+    if (loadError) {
+      logger.warn({ mcNumber }, "Failed to load contacts for wizard step 4");
+    }
     const contacts = contactsResult.success
       ? contactsResult.data?.Carrier?.Contacts || []
       : [];
-    newView = buildStep4View(wizardId, contacts);
+    newView = buildStep4View(wizardId, contacts, { loadError });
   }
 
   if (newView) {
@@ -1162,7 +1251,16 @@ slackApp.action("wizard_next", async ({ ack, body, client }) => {
 slackApp.action("wizard_back", async ({ ack, body, client }) => {
   await ack();
 
-  const { wizardId, step } = JSON.parse(body.view.private_metadata);
+  let wizardId, step;
+  try {
+    ({ wizardId, step } = JSON.parse(body.view.private_metadata));
+  } catch (parseError) {
+    logger.warn(
+      { err: parseError },
+      "Failed to parse private_metadata in wizard_back",
+    );
+    return;
+  }
   const state = wizardState.get(wizardId);
   if (!state) {
     logger.warn({ wizardId, step }, "Wizard state missing on back action");
@@ -1298,8 +1396,31 @@ slackApp.action("wizard_vins_prev", async ({ ack, body, client }) => {
 slackApp.action("wizard_decline", async ({ ack, body, client }) => {
   await ack();
 
-  const { wizardId } = JSON.parse(body.view.private_metadata);
+  let wizardId;
+  try {
+    ({ wizardId } = JSON.parse(body.view.private_metadata));
+  } catch (parseError) {
+    logger.warn(
+      { err: parseError },
+      "Failed to parse private_metadata in wizard_decline",
+    );
+    return;
+  }
+
   const state = wizardState.get(wizardId);
+  if (!state) {
+    logger.warn({ wizardId }, "Wizard state missing on decline action");
+    try {
+      await client.views.update({
+        view_id: body.view.id,
+        view: buildSessionExpiredView(),
+      });
+    } catch (error) {
+      logger.error({ err: error }, "Failed to show session expired view");
+    }
+    return;
+  }
+
   const { mcNumber, channelId, carrierData } = state;
   const userId = body.user.id;
 
@@ -1356,10 +1477,19 @@ slackApp.action("wizard_decline", async ({ ack, body, client }) => {
 // Handle contact selection
 slackApp.action("select_contact", async ({ ack, body }) => {
   await ack();
-  // Store selected contact in wizard state
   const selectedEmail = body.actions[0].selected_option?.value;
   if (selectedEmail) {
-    const stateKey = `${body.user.id}_selected_email`;
+    let wizardId;
+    try {
+      ({ wizardId } = JSON.parse(body.view.private_metadata));
+    } catch (parseError) {
+      logger.warn(
+        { err: parseError },
+        "Failed to parse private_metadata in select_contact",
+      );
+      return;
+    }
+    const stateKey = `${wizardId}_selected_email`;
     wizardState.set(stateKey, selectedEmail);
     logger.info({ userId: body.user.id, selectedEmail }, "Contact selected");
   }
@@ -1369,20 +1499,46 @@ slackApp.action("select_contact", async ({ ack, body }) => {
 slackApp.action("wizard_send_intellivite", async ({ ack, body, client }) => {
   await ack();
 
-  const { wizardId } = JSON.parse(body.view.private_metadata);
+  let wizardId;
+  try {
+    ({ wizardId } = JSON.parse(body.view.private_metadata));
+  } catch (parseError) {
+    logger.warn(
+      { err: parseError },
+      "Failed to parse private_metadata in wizard_send_intellivite",
+    );
+    return;
+  }
+
   const state = wizardState.get(wizardId);
+  if (!state) {
+    logger.warn(
+      { wizardId },
+      "Wizard state missing on send intellivite action",
+    );
+    try {
+      await client.views.update({
+        view_id: body.view.id,
+        view: buildSessionExpiredView(),
+      });
+    } catch (error) {
+      logger.error({ err: error }, "Failed to show session expired view");
+    }
+    return;
+  }
+
   const { mcNumber, channelId, carrierData } = state;
   const userId = body.user.id;
 
   // Get email from manual input or selected contact
   const manualEmail =
     body.view.state?.values?.manual_email_block?.manual_email_input?.value;
-  const stateKey = `${userId}_selected_email`;
+  const stateKey = `${wizardId}_selected_email`;
   const selectedEmail = wizardState.get(stateKey);
   const email = manualEmail || selectedEmail;
 
-  if (!email) {
-    // Update modal with error
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!email || !emailRegex.test(email)) {
     try {
       await client.views.update({
         view_id: body.view.id,
@@ -1394,7 +1550,7 @@ slackApp.action("wizard_send_intellivite", async ({ ack, body, client }) => {
               type: "section",
               text: {
                 type: "mrkdwn",
-                text: "*Please select a contact or enter an email address.*",
+                text: "*Please select a contact or enter a valid email address.*",
               },
             },
             body.view.blocks[body.view.blocks.length - 1],
@@ -1409,7 +1565,6 @@ slackApp.action("wizard_send_intellivite", async ({ ack, body, client }) => {
 
   logger.info({ mcNumber, email, userId }, "Sending Intellivite");
 
-  // Send Intellivite invitation
   const result = await sendIntellivite(mcNumber, email);
 
   if (!result.success) {
@@ -1428,7 +1583,7 @@ slackApp.action("wizard_send_intellivite", async ({ ack, body, client }) => {
               type: "section",
               text: {
                 type: "mrkdwn",
-                text: `Failed to send Intellivite: ${result.message}`,
+                text: "Failed to send Intellivite. Please try again or contact your administrator.",
               },
             },
           ],
@@ -1500,7 +1655,23 @@ slackApp.view("carrier_wizard", async ({ ack, body, view }) => {
 
 // Handle Step 4 modal submission (Send Intellivite)
 slackApp.view("carrier_wizard_step4", async ({ ack, body, view, client }) => {
-  const { wizardId } = JSON.parse(view.private_metadata);
+  let wizardId;
+  try {
+    ({ wizardId } = JSON.parse(view.private_metadata));
+  } catch (parseError) {
+    logger.warn(
+      { err: parseError },
+      "Failed to parse private_metadata in carrier_wizard_step4",
+    );
+    await ack({
+      response_action: "errors",
+      errors: {
+        manual_email_block: "Session expired. Please start a new assessment.",
+      },
+    });
+    return;
+  }
+
   const state = wizardState.get(wizardId);
   const userId = body.user.id;
 
@@ -1519,16 +1690,17 @@ slackApp.view("carrier_wizard_step4", async ({ ack, body, view, client }) => {
   // Get email from manual input or selected contact
   const manualEmail =
     view.state?.values?.manual_email_block?.manual_email_input?.value;
-  const stateKey = `${userId}_selected_email`;
+  const stateKey = `${wizardId}_selected_email`;
   const selectedEmail = wizardState.get(stateKey);
   const email = manualEmail || selectedEmail;
 
-  if (!email) {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!email || !emailRegex.test(email)) {
     await ack({
       response_action: "errors",
       errors: {
         manual_email_block:
-          "Please select a contact or enter an email address.",
+          "Please select a contact or enter a valid email address.",
       },
     });
     return;
@@ -1542,7 +1714,6 @@ slackApp.view("carrier_wizard_step4", async ({ ack, body, view, client }) => {
     "Sending Intellivite via form submit",
   );
 
-  // Send Intellivite invitation
   const result = await sendIntellivite(mcNumber, email);
 
   if (!result.success) {
@@ -1550,11 +1721,10 @@ slackApp.view("carrier_wizard_step4", async ({ ack, body, view, client }) => {
       { err: result.message, mcNumber, email },
       "Failed to send Intellivite",
     );
-    // Post error to channel since modal is already closed
     try {
       await client.chat.postMessage({
         channel: channelId,
-        text: `Failed to send Intellivite for MC${mcNumber}: ${result.message}`,
+        text: `Failed to send Intellivite for MC${mcNumber}. Please try again or contact your administrator.`,
       });
     } catch (error) {
       logger.error({ err: error }, "Failed to post error message");
@@ -1654,6 +1824,22 @@ async function startServer() {
   );
 }
 
+slackApp.error(async (error) => {
+  logger.error({ err: error }, "Unhandled Slack Bolt error");
+});
+
+async function gracefulShutdown(signal) {
+  logger.info({ signal }, "Received shutdown signal, closing gracefully");
+  try {
+    await slackApp.stop();
+  } catch (err) {
+    logger.error({ err }, "Error during graceful shutdown");
+  }
+  process.exit(0);
+}
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+
 process.on("unhandledRejection", (reason) => {
   logger.error({ err: reason }, "Unhandled promise rejection");
   process.exit(1);
@@ -1664,7 +1850,34 @@ process.on("uncaughtException", (err) => {
   process.exit(1);
 });
 
-startServer().catch((err) => {
-  logger.error({ err }, "Failed to start server");
-  process.exit(1);
-});
+// Only start the server when run directly (not imported for testing)
+if (require.main === module) {
+  startServer().catch((err) => {
+    logger.error({ err }, "Failed to start server");
+    process.exit(1);
+  });
+}
+
+// Export functions for testing
+if (typeof module !== "undefined") {
+  module.exports = {
+    getRiskLevelEmoji,
+    getRiskLevel,
+    normalizeNullableText,
+    formatSlackLinks,
+    formatInfractionLine,
+    chunkLines,
+    hasActiveAssessment,
+    setActiveAssessment,
+    clearActiveAssessment,
+    generateWizardId,
+    buildSessionExpiredView,
+    buildStep1View,
+    buildStep2View,
+    buildStep3View,
+    buildStep4View,
+    // Export maps for test manipulation
+    wizardState,
+    activeAssessments,
+  };
+}
