@@ -66,7 +66,9 @@ coverage/
 .Spotlight-V100
 .Trashes
 ehthumbs.db
-tests/*
+# Test output/coverage (keep test source files tracked)
+tests/coverage/
+tests/*.log
 
 
 .postman/
