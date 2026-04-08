@@ -403,7 +403,10 @@ function buildSessionExpiredView(titleText = "Session expired") {
 function buildStep1View(carrierData, mcNumber, channelId, wizardId = null) {
   const data = Array.isArray(carrierData) ? carrierData[0] : carrierData;
   const risk = data.RiskAssessmentDetails || {};
-  const companyName = normalizeNullableText(data.CompanyName, "Unknown Carrier");
+  const companyName = normalizeNullableText(
+    data.CompanyName,
+    "Unknown Carrier",
+  );
   const dbaName = normalizeNullableText(data.DBAName, "");
   const dotNumber = normalizeNullableText(data.DotNumber, "N/A");
   const docketNumber = normalizeNullableText(data.DocketNumber, "N/A");
@@ -642,9 +645,8 @@ function buildStep2View(wizardId, incidentReports = []) {
   categories.forEach((category) => {
     const categoryData = risk[category];
     if (categoryData?.Infractions?.length > 0) {
-      const infractionLines = categoryData.Infractions.map(
-        formatInfractionLine,
-      ).filter(Boolean);
+      const infractionLines =
+        categoryData.Infractions.map(formatInfractionLine).filter(Boolean);
       blocks.push({
         type: "section",
         text: {
@@ -721,9 +723,7 @@ function buildStep3View(wizardId, options = {}) {
   const totalPages = totalCount > 0 ? Math.ceil(totalCount / pageSize) : 0;
   const requestedPage = options.page ?? state.vinPage ?? 0;
   const page =
-    totalPages > 0
-      ? Math.min(Math.max(requestedPage, 0), totalPages - 1)
-      : 0;
+    totalPages > 0 ? Math.min(Math.max(requestedPage, 0), totalPages - 1) : 0;
 
   state.vinPage = page;
   state.vinPageSize = pageSize;
@@ -740,8 +740,7 @@ function buildStep3View(wizardId, options = {}) {
   ];
 
   if (vinVerifications && vinVerifications.length > 0) {
-    const pageLabel =
-      totalPages > 1 ? ` (Page ${page + 1}/${totalPages})` : "";
+    const pageLabel = totalPages > 1 ? ` (Page ${page + 1}/${totalPages})` : "";
     blocks.push({
       type: "section",
       text: {
