@@ -8,12 +8,15 @@ services:
       - libsql-data:/var/lib/sqld
     environment:
       - SQLD_HTTP_LISTEN_ADDR=0.0.0.0:8081
+    mem_limit: 256m
     restart: unless-stopped
 
   mcpslackbot:
     image: docker.linehaul.cloud/mcp-slackbot:latest
     depends_on:
       - libsql
+    mem_limit: 512m
+    memswap_limit: 768m
     environment:
       NODE_ENV: production
       LIBSQL_URL: http://libsql:8081
