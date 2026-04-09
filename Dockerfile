@@ -1,25 +1,20 @@
 FROM oven/bun:1-alpine
 
-# Set working directory
 WORKDIR /usr/src/app
 
-# Copy package files
-COPY package.json bun.lock ./
-
-# Install dependencies
-RUN bun install --production
+# Install dependencies first (cached layer)
+COPY --chown=bun:bun package.json bun.lock ./
+RUN bun install --frozen-lockfile --production
 
 # Copy app source
-COPY . .
-
-# Set proper permissions (bun user exists in oven/bun image)
-RUN chown -R bun:bun /usr/src/app
+COPY --chown=bun:bun . .
 
 # Use non-root user
 USER bun
 
-# Expose port
 EXPOSE 3001
 
-# Start the application
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget -qO- http://localhost:3001/health || exit 1
+
 CMD ["bun", "run", "start"]
