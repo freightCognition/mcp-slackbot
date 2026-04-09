@@ -255,11 +255,8 @@ async function apiCall(endpoint, params = {}, method = "POST") {
         timeout: 15000,
       };
 
-      if (method === "POST") {
-        config.data = params;
-      } else {
-        config.params = params;
-      }
+      // MyCarrierPackets API expects all parameters as query strings
+      config.params = params;
 
       const logParams = params.carrierEmail
         ? { ...params, carrierEmail: redactEmail(params.carrierEmail) }
@@ -1259,7 +1256,7 @@ slackApp.command("/mcp", async ({ command, ack, respond, client }) => {
     return;
   }
 
-  // Post channel message and update modal in parallel
+  // Build Step 1 view and post channel broadcast + update modal in parallel
   const view = buildStep1View(carrierData, mcNumber, channel_id);
 
   const channelMessagePromise = (async () => {
@@ -1276,17 +1273,21 @@ slackApp.command("/mcp", async ({ command, ack, respond, client }) => {
       );
       const risk = data.RiskAssessmentDetails || {};
       const totalPoints = risk.TotalPoints || 0;
-      await client.chat.postMessage({
-        channel: channel_id,
+      await respond({
+        response_type: "in_channel",
+        replace_original: false,
         text: `<@${user_id}> is reviewing ${carrierName} (MC${mcNumber}) - ${getRiskLevelEmoji(totalPoints)} ${getRiskLevel(totalPoints)}`,
         blocks: assessmentBlocks,
       });
+      logger.info(
+        { mcNumber, userId: user_id },
+        "Posted channel assessment broadcast",
+      );
     } catch (error) {
       logger.error(
-        { err: error, mcNumber },
+        { err: error, mcNumber, channelId: channel_id },
         "Failed to post assessment channel message",
       );
-      // Non-fatal: modal update continues regardless
     }
   })();
 
@@ -2057,5 +2058,8 @@ if (typeof module !== "undefined") {
     // Export maps for test manipulation
     wizardState,
     activeAssessments,
+    // Export for testing
+    apiCall,
+    fetchCarrierData,
   };
 }
