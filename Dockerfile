@@ -1,5 +1,10 @@
 FROM oven/bun:1-alpine
 
+LABEL org.opencontainers.image.title="mcp-slackbot"
+LABEL org.opencontainers.image.description="Slack bot for Carrier Risk Assessments via MyCarrierPortal API"
+LABEL org.opencontainers.image.source="https://github.com/freightcognition/mcp-slackbot"
+LABEL org.opencontainers.image.vendor="freightCognition"
+
 WORKDIR /usr/src/app
 
 # Install dependencies first (cached layer)

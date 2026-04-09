@@ -1,0 +1,62 @@
+# Deploy mcp-slackbot on a machine where you registered a GitHub self-hosted runner.
+# Prerequisites on the runner host: Docker Engine + Docker Compose v2 plugin; runner user
+# can run `docker` (e.g. member of `docker` group).
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   BEARER_TOKEN, REFRESH_TOKEN, TOKEN_ENDPOINT_URL, CLIENT_ID, CLIENT_SECRET,
+#   SLACK_APP_TOKEN, SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET
+#
+# Hardening (recommended in GitHub UI):
+#   - Settings → Environments → production: restrict deployment branches to `socket-mode`,
+#     add required reviewers and/or wait timer so deploys need explicit approval.
+#   - Branch protection on `socket-mode` (reviews, no force-push).
+#   - Settings → Actions → Forks: require approval to run workflows from outside collaborators.
+#
+# To target only certain runners, replace `self-hosted` with your labels, e.g. [self-hosted, linux, mcp].
+name: Deploy (self-hosted)
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [socket-mode]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-self-hosted-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/socket-mode' && github.repository == 'freightCognition/mcp-slackbot' && github.event.repository.fork == false
+    runs-on: self-hosted
+    environment: production
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Write .env for Compose
+        run: |
+          set -euo pipefail
+          umask 077
+          {
+            echo "BEARER_TOKEN=${{ secrets.BEARER_TOKEN }}"
+            echo "REFRESH_TOKEN=${{ secrets.REFRESH_TOKEN }}"
+            echo "TOKEN_ENDPOINT_URL=${{ secrets.TOKEN_ENDPOINT_URL }}"
+            echo "CLIENT_ID=${{ secrets.CLIENT_ID }}"
+            echo "CLIENT_SECRET=${{ secrets.CLIENT_SECRET }}"
+            echo "SLACK_APP_TOKEN=${{ secrets.SLACK_APP_TOKEN }}"
+            echo "SLACK_BOT_TOKEN=${{ secrets.SLACK_BOT_TOKEN }}"
+            echo "SLACK_SIGNING_SECRET=${{ secrets.SLACK_SIGNING_SECRET }}"
+          } > .env
+
+      - name: Build and start stack
+        run: docker compose -f docker-compose.yml -f docker-compose.runner.yml up -d --build
+
+      - name: Remove .env from workspace
+        if: always()
+        run: rm -f .env
