@@ -11,10 +11,7 @@ services:
     restart: unless-stopped
 
   mcpslackbot:
-    image: mcpslackbot
-    build:
-      context: .
-      dockerfile: ./Dockerfile
+    image: docker.linehaul.cloud/mcp-slackbot:latest
     depends_on:
       - libsql
     environment:
