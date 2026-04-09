@@ -218,17 +218,20 @@ Navigate to **Settings > Secrets and variables > Actions** and add:
 ### Deployment Workflow
 
 The workflow triggers on:
-- Push to `main` branch
-- Manual trigger via GitHub Actions UI (can deploy any branch)
+- Push to `socket-mode` branch
+- Manual trigger via GitHub Actions UI
+
+The deploy job only runs when all of the following are true:
+- The ref is `refs/heads/socket-mode`
+- The repository is `freightCognition/mcp-slackbot`
+- The event is not from a fork
+- Any required `production` environment approvals have been granted
 
 **Deployment steps:**
-1. Checkout code from specified branch
-2. Stop existing containers
-3. Create `.env` file from GitHub Secrets
-4. Start containers with `docker compose up -d --build`
-5. Wait for containers to start (15 seconds)
-6. Test refresh token functionality
-7. Clean up `.env` file (for security)
+1. Checkout the repository
+2. Create `.env` file from GitHub Secrets
+3. Build and start containers with `docker compose -f docker-compose.yml -f docker-compose.runner.yml up -d --build`
+4. Remove `.env` from the workspace
 
 **View deployment logs:**
 - Go to **Actions** tab in GitHub
@@ -237,10 +240,10 @@ The workflow triggers on:
 
 **Manual deployment:**
 1. Go to **Actions** tab
-2. Select **Deploy to Production** workflow
+2. Select **Deploy (self-hosted)** workflow
 3. Click **Run workflow**
-4. Enter branch name (or leave as `main`)
-5. Click **Run workflow** button
+4. Select the `socket-mode` branch in the branch dropdown
+5. Approve the `production` environment deployment if prompted
 
 ## Updating Tokens
 
