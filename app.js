@@ -255,11 +255,8 @@ async function apiCall(endpoint, params = {}, method = "POST") {
         timeout: 15000,
       };
 
-      if (method === "POST") {
-        config.data = params;
-      } else {
-        config.params = params;
-      }
+      // MyCarrierPackets API expects all parameters as query strings
+      config.params = params;
 
       const logParams = params.carrierEmail
         ? { ...params, carrierEmail: redactEmail(params.carrierEmail) }
@@ -2061,5 +2058,8 @@ if (typeof module !== "undefined") {
     // Export maps for test manipulation
     wizardState,
     activeAssessments,
+    // Export for testing
+    apiCall,
+    fetchCarrierData,
   };
 }
