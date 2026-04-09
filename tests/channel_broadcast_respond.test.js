@@ -47,11 +47,13 @@ describe("channel broadcast respond payload", () => {
     // This is the payload that respond() should receive
     const payload = {
       response_type: "in_channel",
+      replace_original: false,
       text: `<@${userId}> is reviewing ${carrierName} (MC${mcNumber}) - ${getRiskLevelEmoji(totalPoints)} ${getRiskLevel(totalPoints)}`,
       blocks: assessmentBlocks,
     };
 
     expect(payload.response_type).toBe("in_channel");
+    expect(payload.replace_original).toBe(false);
     expect(payload.text).toContain("<@U12345>");
     expect(payload.text).toContain("TEST TRUCKING LLC");
     expect(payload.text).toContain("MC789012");
