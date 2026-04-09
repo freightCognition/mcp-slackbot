@@ -28,7 +28,7 @@ logs/
 
 # Build output
 dist/
-build/ 
+build/
 
 # Dependencies
 node_modules/
@@ -70,6 +70,7 @@ ehthumbs.db
 tests/coverage/
 tests/*.log
 
+roadmap/
 
 .postman/
 .postman_environments
@@ -88,3 +89,7 @@ postman/**/*.json
 
 docs/
 thoughts/
+mcp-slackbot.tar
+AGENTS.md
+CLAUDE.md
+.cursor/

@@ -1,0 +1,9 @@
+# Override for building and running the bot image on a self-hosted runner (or any host
+# with the repo checked out). Use with the base file:
+#   docker compose -f docker-compose.yml -f docker-compose.runner.yml up -d --build
+services:
+  mcpslackbot:
+    image: mcp-slackbot:local
+    build:
+      context: .
+      dockerfile: Dockerfile
