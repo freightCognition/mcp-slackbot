@@ -1094,6 +1094,63 @@ async function refreshAccessToken() {
   }
 }
 
+// Applies a token-endpoint response: validates, updates in-memory state,
+// and persists to the database (DB failure does not invalidate the refresh).
+async function _applyTokenResponse(responseData, context) {
+  const newAccessToken = responseData.access_token;
+  const newRefreshToken = responseData.refresh_token;
+
+  if (!newAccessToken) {
+    throw new Error("access_token missing from token endpoint response");
+  }
+
+  BEARER_TOKEN = newAccessToken;
+
+  let newRefreshIssued = false;
+  if (newRefreshToken) {
+    REFRESH_TOKEN = newRefreshToken;
+    newRefreshIssued = true;
+  }
+
+  try {
+    await saveTokens(BEARER_TOKEN, REFRESH_TOKEN);
+  } catch (dbError) {
+    logger.error(
+      {
+        err: dbError,
+        context,
+        tokenRefreshSucceeded: true,
+        newRefreshIssued,
+      },
+      "Failed to persist tokens to database - in-memory tokens remain valid",
+    );
+  }
+
+  return newRefreshIssued;
+}
+
+// Re-auth via password grant using CLIENT_ID/CLIENT_SECRET as username/password.
+// MyCarrierPackets confirmed (per thoughts/shared/research/2025-12-30) these are
+// account credentials, not OAuth2 client creds — used to bootstrap a fresh
+// refresh_token when the current one is revoked/expired.
+async function _passwordGrantReauth() {
+  const data = qs.stringify({
+    grant_type: "password",
+    username: CLIENT_ID,
+    password: CLIENT_SECRET,
+  });
+
+  const response = await axios.post(TOKEN_ENDPOINT_URL, data, {
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  });
+
+  if (!response.data.refresh_token) {
+    throw new Error("refresh_token missing from password grant response");
+  }
+
+  return _applyTokenResponse(response.data, "passwordGrantReauth");
+}
+
 async function _doRefreshAccessToken() {
   logger.info("Attempting to refresh access token...");
   try {
@@ -1108,44 +1165,58 @@ async function _doRefreshAccessToken() {
       },
     });
 
-    const newAccessToken = response.data.access_token;
-    const newRefreshToken = response.data.refresh_token;
+    const newRefreshIssued = await _applyTokenResponse(
+      response.data,
+      "refreshAccessToken",
+    );
 
-    if (!newAccessToken) {
-      throw new Error("New access token not found in refresh response");
-    }
-
-    logger.info("Access token refreshed successfully.");
-    BEARER_TOKEN = newAccessToken;
-
-    let newRefreshIssued = false;
-    if (newRefreshToken) {
-      logger.info("New refresh token received.");
-      REFRESH_TOKEN = newRefreshToken;
-      newRefreshIssued = true;
-    } else {
+    logger.info({ newRefreshIssued }, "Access token refreshed successfully.");
+    if (!newRefreshIssued) {
       logger.warn(
         "New refresh token was not provided in the response. Old refresh token will be reused.",
       );
     }
 
-    // Save tokens to database (non-blocking - in-memory tokens remain valid if DB fails)
-    try {
-      await saveTokens(BEARER_TOKEN, REFRESH_TOKEN);
-    } catch (dbError) {
-      logger.error(
-        {
-          err: dbError,
-          context: "refreshAccessToken",
-          tokenRefreshSucceeded: true,
-          newRefreshIssued,
-        },
-        "Failed to persist tokens to database - in-memory tokens remain valid",
+    return { success: true, newRefreshIssued, usedPasswordFallback: false };
+  } catch (error) {
+    const isInvalidGrant =
+      error.response?.status === 400 &&
+      error.response?.data?.error === "invalid_grant";
+
+    if (isInvalidGrant) {
+      logger.warn(
+        { responseData: error.response.data },
+        "Refresh token rejected as invalid_grant — attempting password-grant self-heal",
       );
+      try {
+        await _passwordGrantReauth();
+        logger.warn(
+          { usedPasswordFallback: true },
+          "Access token refreshed via password-grant fallback. Upstream refresh token was invalid or expired; a new pair has been persisted.",
+        );
+        return {
+          success: true,
+          newRefreshIssued: true,
+          usedPasswordFallback: true,
+        };
+      } catch (fallbackError) {
+        logger.error(
+          {
+            err: fallbackError,
+            responseData: fallbackError.response
+              ? fallbackError.response.data
+              : undefined,
+          },
+          "Password-grant fallback failed. Manual intervention required.",
+        );
+        return {
+          success: false,
+          newRefreshIssued: false,
+          usedPasswordFallback: true,
+        };
+      }
     }
 
-    return { success: true, newRefreshIssued };
-  } catch (error) {
     logger.error(
       {
         err: error,
@@ -1153,12 +1224,11 @@ async function _doRefreshAccessToken() {
       },
       "Error refreshing access token",
     );
-    if (error.response && error.response.status === 400) {
-      logger.error(
-        "Refresh token might be invalid or expired. Manual intervention may be required.",
-      );
-    }
-    return { success: false, newRefreshIssued: false };
+    return {
+      success: false,
+      newRefreshIssued: false,
+      usedPasswordFallback: false,
+    };
   }
 }
 
@@ -2061,5 +2131,14 @@ if (typeof module !== "undefined") {
     // Export for testing
     apiCall,
     fetchCarrierData,
+    refreshAccessToken,
+    __getTokensForTest: () => ({
+      bearer: BEARER_TOKEN,
+      refresh: REFRESH_TOKEN,
+    }),
+    __setTokensForTest: (bearer, refresh) => {
+      BEARER_TOKEN = bearer;
+      REFRESH_TOKEN = refresh;
+    },
   };
 }
