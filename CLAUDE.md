@@ -7,7 +7,7 @@
 **Author**: Anthony Fecarotta (freightCognition & linehaul.ai)
 **License**: MIT
 **Version**: 2.1.4
-**Repository**: https://github.com/freightcognition/mcp-slackbot
+**Repository**: https://github.com/freightcognition/risk-slackbot
 
 ## Architecture
 
@@ -24,7 +24,7 @@
 ### Core Components
 
 1. **Bolt App with Socket Mode** ([app.js](app.js))
-   - Slack command handler (`/mcp`) using `app.command()`
+   - Slack command handler (`/risk`) using `app.command()`
    - Multi-step wizard modal (4 steps) with view push/update
    - Action handlers for wizard navigation, pagination, and contact selection
    - Health check endpoint via `customRoutes` on port 3001
@@ -40,7 +40,7 @@
 
 3. **Slack Integration**
    - Socket Mode (WebSocket connection to Slack)
-   - Slash command (`/mcp`) via Bolt SDK
+   - Slash command (`/risk`) via Bolt SDK
    - Multi-step modal wizard with Block Kit UI
    - Channel broadcast of risk assessment summaries
    - Signature verification handled by Bolt
@@ -52,7 +52,7 @@
 
 ## Key Features
 
-- **Carrier Risk Assessment Wizard**: 4-step modal wizard initiated via `/mcp [DOT_NUMBER]`
+- **Carrier Risk Assessment Wizard**: 4-step modal wizard initiated via `/risk [DOT_NUMBER]`
   - Step 1: Carrier overview (name, MC#, DOT#, risk score, authority status)
   - Step 2: Incident reports with pagination
   - Step 3: VIN verifications with pagination (10 per page)
@@ -153,7 +153,7 @@ mcp-slackbot/
 
 ### Slack Handlers
 
-- **Command**: `/mcp` - Initiates wizard, fetches carrier data, opens Step 1 modal
+- **Command**: `/risk` - Initiates wizard, fetches carrier data, opens Step 1 modal
 - **Actions**: `wizard_next`, `wizard_back`, `wizard_vins_next`, `wizard_vins_prev`, `wizard_decline`, `select_contact`, `wizard_send_intellivite`
 - **View submissions**: `carrier_wizard`, `carrier_wizard_step4`
 - **View closed**: Cleanup handlers for wizard state and active assessments
@@ -226,10 +226,10 @@ bun run pm2:logs
 ## Slack Command Format
 
 ```
-/mcp [DOT_NUMBER]
+/risk [DOT_NUMBER]
 ```
 
-**Example**: `/mcp 12345`
+**Example**: `/risk 12345`
 
 Opens a 4-step wizard modal for the requesting user and broadcasts a risk assessment summary to the channel.
 
@@ -303,7 +303,7 @@ Opens a 4-step wizard modal for the requesting user and broadcasts a risk assess
 ## Contact & Support
 
 **Maintainer**: freightCognition
-**Issues**: https://github.com/freightcognition/mcp-slackbot/issues
+**Issues**: https://github.com/freightcognition/risk-slackbot/issues
 **Keywords**: slack, slackbot, mycarrierportal, fakebizprez, linehaul.ai
 
 ## Notes for AI Assistants
