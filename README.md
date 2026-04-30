@@ -351,7 +351,7 @@ To use this bot, you need to create a Slack App:
 1. Navigate to **Features > Slash Commands**
 2. Click **Create New Command**
 3. Configure:
-   - **Command:** `/mcp`
+   - **Command:** `/risk`
    - **Request URL:** Use a placeholder URL (Socket Mode does not require a public endpoint)
    - **Short Description:** "Fetch MCP Carrier Risk Assessment"
    - **Usage Hint:** `[MC number]`
@@ -467,7 +467,7 @@ docker compose exec mcpslackbot node tests/test_refresh.js
 Test automatic token refresh when access token expires:
 
 1. Use an old/expired `BEARER_TOKEN`
-2. Trigger a Slack command: `/mcp MC123456`
+2. Trigger a Slack command: `/risk MC123456`
 3. Watch logs for automatic refresh:
    ```bash
    docker compose logs -f mcpslackbot
