@@ -408,7 +408,7 @@ describe("Wizard View Builders - null state handling", () => {
 });
 
 describe("MC number input normalization", () => {
-  // Mirrors the normalization logic in the /mcp command handler
+  // Mirrors the normalization logic in the /risk command handler
   const normalizeMcInput = (text) => text.trim().replace(/^mc/i, "");
   const isValidMcNumber = (mc) => /^\d{1,8}$/.test(mc);
 
