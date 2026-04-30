@@ -1232,8 +1232,8 @@ async function _doRefreshAccessToken() {
   }
 }
 
-// /mcp command - Opens carrier assessment wizard modal
-slackApp.command("/mcp", async ({ command, ack, respond, client }) => {
+// /risk command - Opens carrier assessment wizard modal
+slackApp.command("/risk", async ({ command, ack, respond, client }) => {
   await ack();
 
   const { text, channel_id, trigger_id, user_id } = command;
