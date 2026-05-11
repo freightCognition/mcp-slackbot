@@ -1,37 +1,19 @@
-import { describe, it, expect, beforeEach, mock } from "bun:test";
+import { describe, it, expect, beforeEach } from "vitest";
+import {
+  installMockAxios,
+  installMockSlackBolt,
+} from "./helpers/cjs-mocks.js";
 
-// Capture axios call configs
 const axiosCalls = [];
 
-// Mock @slack/bolt to prevent real Slack connections during tests
-mock.module("@slack/bolt", () => {
-  class MockApp {
-    constructor() {}
-    command() {}
-    action() {}
-    view() {}
-    error() {}
-    async start() {
-      return {};
-    }
-  }
-  return { App: MockApp };
-});
-
-// Mock axios CJS entry point - must use require.resolve() to get the exact
-// path that app.js resolves via require("axios"), since mock.module("axios")
-// only intercepts ESM imports, not CJS require() calls in Bun.
-mock.module(require.resolve("axios"), () => {
-  const mockAxios = async (config) => {
+installMockSlackBolt();
+installMockAxios({
+  request: async (config) => {
     axiosCalls.push(config);
     return { data: { AssureAdvantage: [{ CarrierDetails: {} }] } };
-  };
-  mockAxios.isAxiosError = () => false;
-  mockAxios.create = () => mockAxios;
-  return { default: mockAxios, __esModule: true };
+  },
 });
 
-// Set dummy env vars before importing app.js
 process.env.BEARER_TOKEN = process.env.BEARER_TOKEN || "test-bearer";
 process.env.REFRESH_TOKEN = process.env.REFRESH_TOKEN || "test-refresh";
 process.env.TOKEN_ENDPOINT_URL =

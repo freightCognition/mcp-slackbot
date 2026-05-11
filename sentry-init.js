@@ -1,4 +1,4 @@
-const Sentry = require("@sentry/bun");
+const Sentry = require("@sentry/node");
 const pkg = require("./package.json");
 
 let initialized = false;

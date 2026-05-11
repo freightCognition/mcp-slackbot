@@ -18,4 +18,10 @@ export default [
             sourceType: "commonjs",
         },
     },
+    {
+        files: ["tests/**/*.js"],
+        languageOptions: {
+            sourceType: "module",
+        },
+    },
 ];

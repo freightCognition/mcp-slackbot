@@ -1,50 +1,35 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "fs";
-import { resolve } from "path";
+import { dirname, resolve } from "path";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import {
+  installMockSentryNode,
+  installMockLogger,
+  projectResolve,
+} from "./helpers/cjs-mocks.js";
 
-const SENTRY_INIT_PATH = resolve(__dirname, "../sentry-init.js");
-const SENTRY_BUN_PATH = require.resolve("@sentry/bun");
-const LOGGER_PATH = resolve(__dirname, "../logger.js");
-const APP_PATH = resolve(__dirname, "../app.js");
+const here = dirname(fileURLToPath(import.meta.url));
+const projectRequire = createRequire(resolve(here, "../package.json"));
+
+const SENTRY_INIT_PATH = resolve(here, "../sentry-init.js");
+const LOGGER_PATH = projectResolve("./logger");
+const APP_PATH = resolve(here, "../app.js");
 
 const initCalls = [];
 const loggerWarnCalls = [];
 
-function installSentryMock() {
-  require.cache[SENTRY_BUN_PATH] = {
-    id: SENTRY_BUN_PATH,
-    filename: SENTRY_BUN_PATH,
-    loaded: true,
-    exports: {
-      init: (options) => {
-        initCalls.push(options);
-      },
-      addBreadcrumb: () => {},
-      captureException: () => {},
-      close: () => Promise.resolve(true),
-    },
-  };
-}
-
-function installLoggerMock() {
-  require.cache[LOGGER_PATH] = {
-    id: LOGGER_PATH,
-    filename: LOGGER_PATH,
-    loaded: true,
-    exports: {
-      warn: (...args) => loggerWarnCalls.push(args),
-      error: () => {},
-      info: () => {},
-      debug: () => {},
-    },
-  };
-}
-
 async function loadSentryInitFresh() {
-  delete require.cache[SENTRY_INIT_PATH];
-  installSentryMock();
-  installLoggerMock();
-  const mod = require(SENTRY_INIT_PATH);
+  delete projectRequire.cache[SENTRY_INIT_PATH];
+  installMockSentryNode({
+    init: (options) => {
+      initCalls.push(options);
+    },
+  });
+  installMockLogger({
+    warn: (...args) => loggerWarnCalls.push(args),
+  });
+  const mod = projectRequire(SENTRY_INIT_PATH);
   // Allow process.nextTick handlers inside sentry-init to run before assertions.
   await new Promise((r) => process.nextTick(r));
   return mod;
@@ -59,7 +44,7 @@ describe("sentry-init configuration", () => {
   });
 
   afterEach(() => {
-    delete require.cache[LOGGER_PATH];
+    delete projectRequire.cache[LOGGER_PATH];
   });
 
   it("does not enable sendDefaultPii (protects Slack tokens and request bodies)", async () => {
@@ -129,7 +114,7 @@ describe("sentry-init tracesSampleRate clamping", () => {
   afterEach(() => {
     delete process.env.SENTRY_TRACES_SAMPLE_RATE;
     delete process.env.SENTRY_DSN;
-    delete require.cache[LOGGER_PATH];
+    delete projectRequire.cache[LOGGER_PATH];
   });
 
   it("defaults to 1.0 when env var is unset", async () => {

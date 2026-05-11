@@ -1,12 +1,17 @@
-import { describe, it, expect, beforeEach, mock } from "bun:test";
+import { describe, it, expect, beforeEach } from "vitest";
+import {
+  installMockAxios,
+  installMockSlackBolt,
+  installMockSentryNode,
+} from "./helpers/cjs-mocks.js";
 
 const sentryCalls = [];
 const sentryCloseCalls = [];
 let sentryCloseImpl = () => Promise.resolve(true);
+let axiosImpl = async () => ({ data: {} });
 
-// Bun's mock.module only intercepts ESM by name; the app uses CJS require,
-// so we mock against the resolved path (same trick as api_params.test.js).
-mock.module(require.resolve("@sentry/bun"), () => ({
+installMockSlackBolt();
+installMockSentryNode({
   init: () => {},
   addBreadcrumb: () => {},
   captureException: (err, options) => {
@@ -16,31 +21,9 @@ mock.module(require.resolve("@sentry/bun"), () => ({
     sentryCloseCalls.push(timeout);
     return sentryCloseImpl();
   },
-}));
-
-mock.module("@slack/bolt", () => {
-  class MockApp {
-    constructor() {}
-    command() {}
-    action() {}
-    view() {}
-    error() {}
-    async start() {
-      return {};
-    }
-  }
-  return { App: MockApp };
 });
-
-// Axios mock — by default returns success; individual tests override the
-// behavior to throw an error with a rich response body that must be scrubbed
-// before reaching Sentry.
-let axiosImpl = async () => ({ data: {} });
-mock.module(require.resolve("axios"), () => {
-  const mockAxios = (config) => axiosImpl(config);
-  mockAxios.isAxiosError = () => false;
-  mockAxios.create = () => mockAxios;
-  return { default: mockAxios, __esModule: true };
+installMockAxios({
+  request: (config) => axiosImpl(config),
 });
 
 process.env.BEARER_TOKEN = process.env.BEARER_TOKEN || "test-bearer";

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach } from "vitest";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 
@@ -19,7 +19,6 @@ const {
   getRiskLevel,
   normalizeNullableText,
   formatSlackLinks,
-  formatInfractionLine,
   chunkLines,
   hasActiveAssessment,
   setActiveAssessment,

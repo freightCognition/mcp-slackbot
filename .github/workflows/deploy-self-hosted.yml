@@ -8,6 +8,7 @@
 #
 # Optional repository secrets/variables for Sentry:
 #   SENTRY_DSN (secret), SENTRY_ENVIRONMENT (var), SENTRY_TRACES_SAMPLE_RATE (var)
+#   DSN source: linehaulai.sentry.io project `mcp-slackbot-node` (Node.js platform).
 #
 # Hardening (recommended in GitHub UI):
 #   - Settings → Environments → production: restrict deployment branches to `socket-mode`,

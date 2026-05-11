@@ -13,7 +13,7 @@
 
 ### Technology Stack
 
-- **Runtime**: Bun >= 1.0.0
+- **Runtime**: Node.js >= 22.0.0
 - **Framework**: @slack/bolt (Socket Mode)
 - **HTTP Client**: Axios
 - **Database**: LibSQL (token persistence + audit logging)
@@ -73,7 +73,8 @@ mcp-slackbot/
 ├── db.js                               # LibSQL database operations
 ├── logger.js                           # Pino structured logging configuration
 ├── package.json                        # Dependencies and scripts
-├── bun.lock                            # Bun lockfile
+├── pnpm-lock.yaml                      # pnpm lockfile
+├── pnpm-workspace.yaml                 # pnpm settings (allowed build scripts)
 ├── eslint.config.mjs                   # ESLint configuration
 ├── Dockerfile                          # Container configuration
 ├── docker-compose.yml                  # Docker orchestration with health checks
@@ -179,11 +180,11 @@ mcp-slackbot/
 ### Testing
 
 ```bash
-bun test                    # Run main test suite (app.test.js)
-bun run test:token          # Test bearer token
-bun run test:refresh        # Test token refresh
-bun run lint                # Run ESLint
-bun run lint:fix            # Auto-fix lint issues
+pnpm test                    # Run vitest suite (all tests/*.test.js)
+pnpm test:token              # Test bearer token
+pnpm test:refresh            # Test token refresh
+pnpm lint                    # Run ESLint
+pnpm lint:fix                # Auto-fix lint issues
 ```
 
 ### Deployment
@@ -192,16 +193,16 @@ bun run lint:fix            # Auto-fix lint issues
 # Docker Compose (recommended)
 docker compose up -d
 
-# Bun direct
-bun install
-bun run start
+# Node.js direct
+pnpm install --frozen-lockfile
+pnpm start
 
-# Development (hot reload)
-bun run dev
+# Development (auto-restart via node --watch)
+pnpm dev
 
 # PM2 process manager
-bun run pm2:start
-bun run pm2:logs
+pnpm pm2:start
+pnpm pm2:logs
 ```
 
 ## API Integration
@@ -258,7 +259,7 @@ Opens a 4-step wizard modal for the requesting user and broadcasts a risk assess
 2. Update endpoint/parameters (use `CARRIER_API_URL` constant)
 3. Handle new response structure
 4. Update error handling
-5. Test with `bun test`
+5. Test with `pnpm test`
 
 ### Debugging
 
@@ -293,8 +294,8 @@ Opens a 4-step wizard modal for the requesting user and broadcasts a risk assess
 
 1. Create feature branch from `main`
 2. Implement changes with tests
-3. Run `bun test` to validate
-4. Run `bun run lint` to check code style
+3. Run `pnpm test` to validate
+4. Run `pnpm lint` to check code style
 5. Update documentation if needed
 6. Create pull request to `main`
 7. GitHub Actions runs automated tests

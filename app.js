@@ -1,6 +1,6 @@
 require("dotenv").config();
 const { sentryConfigured } = require("./sentry-init");
-const Sentry = require("@sentry/bun");
+const Sentry = require("@sentry/node");
 const { App } = require("@slack/bolt");
 const axios = require("axios");
 const qs = require("qs");
