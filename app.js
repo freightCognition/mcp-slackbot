@@ -1,9 +1,12 @@
+require("dotenv").config();
+require("./sentry-init");
+const Sentry = require("@sentry/bun");
 const { App } = require("@slack/bolt");
 const axios = require("axios");
 const qs = require("qs");
-require("dotenv").config();
 const { initDb, getTokens, saveTokens, logAuditEntry } = require("./db");
 const logger = require("./logger");
+const { sentryConfigured } = require("./sentry-init");
 
 // Configurable API URL (default to production)
 const CARRIER_API_URL =
@@ -72,6 +75,7 @@ const slackApp = new App({
           timestamp: new Date().toISOString(),
           socketMode: true,
           database: dbAvailable ? "connected" : "unavailable",
+          sentry: sentryConfigured() ? "ok" : "unconfigured",
         };
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(health));
@@ -280,6 +284,13 @@ async function apiCall(endpoint, params = {}, method = "POST") {
         { err: error, endpoint, responseData: error.response?.data },
         "API call failed",
       );
+      // 404s are expected for invalid DOT numbers — don't page Sentry on them
+      if (error.response?.status !== 404) {
+        Sentry.captureException(error, {
+          tags: { endpoint, status: error.response?.status },
+          extra: { responseData: error.response?.data },
+        });
+      }
       return {
         success: false,
         error: error.response?.status === 404 ? "not_found" : "api_error",
@@ -2074,12 +2085,14 @@ async function startServer() {
 
 slackApp.error(async (error) => {
   logger.error({ err: error }, "Unhandled Slack Bolt error");
+  Sentry.captureException(error, { tags: { source: "slack-bolt" } });
 });
 
 async function gracefulShutdown(signal) {
   logger.info({ signal }, "Received shutdown signal, closing gracefully");
   try {
     await slackApp.stop();
+    await Sentry.close(2000);
   } catch (err) {
     logger.error({ err }, "Error during graceful shutdown");
   }
@@ -2090,12 +2103,14 @@ process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
 process.on("unhandledRejection", (reason) => {
   logger.error({ err: reason }, "Unhandled promise rejection");
-  process.exit(1);
+  Sentry.captureException(reason, { tags: { source: "unhandledRejection" } });
+  Sentry.close(2000).finally(() => process.exit(1));
 });
 
 process.on("uncaughtException", (err) => {
   logger.error({ err }, "Uncaught exception");
-  process.exit(1);
+  Sentry.captureException(err, { tags: { source: "uncaughtException" } });
+  Sentry.close(2000).finally(() => process.exit(1));
 });
 
 // Only start the server when run directly (not imported for testing)
