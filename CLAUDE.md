@@ -6,7 +6,7 @@
 
 **Author**: Anthony Fecarotta (freightCognition & linehaul.ai)
 **License**: MIT
-**Version**: 2.1.4
+**Version**: 3.0.0
 **Repository**: https://github.com/freightcognition/risk-slackbot
 
 ## Architecture
@@ -14,10 +14,13 @@
 ### Technology Stack
 
 - **Runtime**: Node.js >= 22.0.0
+- **Package Manager**: pnpm >= 10.0.0 (declared via `packageManager` in package.json)
 - **Framework**: @slack/bolt (Socket Mode)
 - **HTTP Client**: Axios
 - **Database**: LibSQL (token persistence + audit logging)
 - **Logging**: Pino
+- **Error Monitoring**: Sentry (@sentry/node, optional via `SENTRY_DSN`)
+- **Test Runner**: Vitest
 - **Process Management**: PM2
 - **Deployment**: Docker/Docker Compose
 
@@ -50,6 +53,14 @@
    - Audit logging for invite/decline actions
    - Graceful fallback when database is unavailable
 
+5. **Error Monitoring** ([sentry-init.js](sentry-init.js))
+   - Sentry SDK initialized at process start when `SENTRY_DSN` is set
+   - No-op when DSN is absent — logs a warning and continues
+   - Captures Bolt errors via `app.error()` and `unhandledRejection`/`uncaughtException` handlers
+   - Sample rate controlled by `SENTRY_TRACES_SAMPLE_RATE` (clamped to [0,1])
+   - Sensitive data (tokens, secrets, bearer headers) sanitized before send — see `logger.js` and `tests/app_sentry_sanitization.test.js`
+   - Graceful flush on shutdown via `Sentry.close(2000)`
+
 ## Key Features
 
 - **Carrier Risk Assessment Wizard**: 4-step modal wizard initiated via `/risk [DOT_NUMBER]`
@@ -69,10 +80,11 @@
 
 ```
 mcp-slackbot/
-├── app.js                              # Main Bolt application (~1,976 lines)
+├── app.js                              # Main Bolt application (~2,170 lines)
 ├── db.js                               # LibSQL database operations
-├── logger.js                           # Pino structured logging configuration
-├── package.json                        # Dependencies and scripts
+├── logger.js                           # Pino structured logging + sensitive-data sanitizer
+├── sentry-init.js                      # Sentry SDK init (no-op when SENTRY_DSN unset)
+├── package.json                        # Dependencies, scripts, packageManager pin
 ├── pnpm-lock.yaml                      # pnpm lockfile
 ├── pnpm-workspace.yaml                 # pnpm settings (allowed build scripts)
 ├── eslint.config.mjs                   # ESLint configuration
@@ -80,16 +92,23 @@ mcp-slackbot/
 ├── docker-compose.yml                  # Docker orchestration with health checks
 ├── docker-compose.debug.yml.example    # Debug compose template
 ├── .env.example                        # Environment template
-├── tests/
-│   ├── app.test.js                     # Main test suite (90+ test cases)
+├── tests/                              # Vitest test suite
+│   ├── app.test.js                     # Main test suite
+│   ├── api_params.test.js              # API param construction tests
+│   ├── app_sentry_sanitization.test.js # Sentry beforeSend scrubbing tests
 │   ├── channel_assessment.test.js      # Channel broadcast block tests
+│   ├── channel_broadcast_respond.test.js # Channel respond() tests
+│   ├── logger_sanitizer.test.js        # Logger redaction tests
+│   ├── runtime.test.js                 # Runtime/env sanity tests
+│   ├── sentry_init.test.js             # sentry-init.js init/no-op tests
+│   ├── token_refresh.test.js           # Token refresh + mutex tests
+│   ├── helpers/                        # Shared test helpers
 │   ├── fixtures/
 │   │   ├── carrier-response.json       # Low-risk carrier test data (150 pts)
 │   │   └── carrier-high-risk.json      # High-risk carrier test data (3500 pts)
-│   ├── test_preview.js                 # Preview functionality tests
-│   ├── test_refresh.js                 # Token refresh tests
-│   └── test_token.js                   # Bearer token validation tests
-├── docs/                               # Additional documentation
+│   ├── test_preview.js                 # Preview functionality script
+│   ├── test_refresh.js                 # Token refresh script
+│   └── test_token.js                   # Bearer token validation script
 ├── roadmap/                            # Project roadmap
 ├── postman/                            # Postman API collections
 ├── .github/
@@ -117,6 +136,10 @@ mcp-slackbot/
 
 - `LIBSQL_URL`: LibSQL database URL for token persistence (default: `http://localhost:8081`)
 - `LOG_LEVEL`: Pino log level (default: `info`)
+- `SENTRY_DSN`: Sentry DSN. **Leave empty to disable error monitoring** — the app no-ops Sentry calls and logs a warning at startup.
+- `SENTRY_ENVIRONMENT`: Sentry environment tag (default: `NODE_ENV`, then `production`)
+- `SENTRY_RELEASE`: Release identifier (default: `mcp-slackbot@<package.json version>`)
+- `SENTRY_TRACES_SAMPLE_RATE`: Trace sample rate `0..1` (default: `1.0`; values outside the range are clamped)
 
 ## Application Structure (app.js)
 
@@ -179,13 +202,19 @@ mcp-slackbot/
 
 ### Testing
 
+The project uses **Vitest** as its test runner (migrated from Bun's test runner). Run with pnpm:
+
 ```bash
-pnpm test                    # Run vitest suite (all tests/*.test.js)
-pnpm test:token              # Test bearer token
-pnpm test:refresh            # Test token refresh
+pnpm test                    # Run full Vitest suite (tests/**/*.test.js)
+pnpm test:watch              # Vitest watch mode
+pnpm test:api-params         # Single suite: API param construction
+pnpm test:token              # Standalone bearer token script
+pnpm test:refresh            # Standalone token refresh script
 pnpm lint                    # Run ESLint
 pnpm lint:fix                # Auto-fix lint issues
 ```
+
+Use `pnpm` for **all** scripts — Bun is no longer supported and `bun test` will not discover the suite.
 
 ### Deployment
 
@@ -200,7 +229,7 @@ pnpm start
 # Development (auto-restart via node --watch)
 pnpm dev
 
-# PM2 process manager
+# PM2 process manager (uses node interpreter)
 pnpm pm2:start
 pnpm pm2:logs
 ```
@@ -265,8 +294,9 @@ Opens a 4-step wizard modal for the requesting user and broadcasts a risk assess
 
 - Check container logs: `docker compose logs -f mcpslackbot`
 - Monitor token refresh: `docker logs -f mcpslackbot | grep -i refresh`
-- Health check: `curl http://localhost:3001/health`
-- Check database status in health response
+- Health check: `curl http://localhost:3001/health` (reports `sentry: ok | unconfigured` alongside db status)
+- Inspect Sentry events: https://linehaulai.sentry.io/projects/mcp-slackbot-node/
+- Sentry disabled locally? Leave `SENTRY_DSN` empty in `.env` — the app logs a warning and continues without it.
 
 ## Troubleshooting
 
@@ -289,6 +319,12 @@ Opens a 4-step wizard modal for the requesting user and broadcasts a risk assess
 - **Container won't start**: Check `docker compose logs`
 - **Health check failing**: Verify port 3001 is exposed
 - **Environment variables not loading**: Verify `.env` file location and formatting
+
+### Sentry / Error Monitoring
+
+- **No events in Sentry**: Confirm `SENTRY_DSN` is set in the container env (`docker compose exec mcpslackbot env | grep SENTRY`) and that `/health` reports `sentry: ok`
+- **Sensitive data appearing in events**: Check the sanitizer in `logger.js` and the `beforeSend` hook; add coverage in `tests/app_sentry_sanitization.test.js`
+- **Want local dev without Sentry**: Leave `SENTRY_DSN` blank — the SDK no-ops and only a single startup warning is logged
 
 ## Development Workflow
 
@@ -321,3 +357,6 @@ Opens a 4-step wizard modal for the requesting user and broadcasts a risk assess
 - Modal views use Slack Block Kit - respect 75-char limits for option labels/values
 - Test commands in Docker before suggesting deployment
 - Health endpoint available at `http://localhost:3001/health`
+- **Always use `pnpm`, never `bun` or `npm`** — `pnpm` is pinned via `packageManager` and CI/Docker assume it
+- Tests run under **Vitest** (`pnpm test`). When adding tests, use `vitest`'s `describe`/`it`/`expect` API and place files under `tests/*.test.js`
+- When adding code paths that throw, ensure errors flow through `Sentry.captureException` with appropriate `tags` (see existing `source: "slack-bolt"` pattern) and that any user/secret data is scrubbed first
