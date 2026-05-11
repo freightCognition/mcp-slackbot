@@ -10,9 +10,7 @@ if (dsn) {
     environment: process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || "production",
     release: process.env.SENTRY_RELEASE || `mcp-slackbot@${pkg.version}`,
     tracesSampleRate: parseFloat(process.env.SENTRY_TRACES_SAMPLE_RATE || "1.0"),
-    sendDefaultPii: true,
     enableLogs: true,
-    includeLocalVariables: true,
     shutdownTimeout: 2000,
   });
   initialized = true;

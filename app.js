@@ -1,12 +1,11 @@
 require("dotenv").config();
-require("./sentry-init");
+const { sentryConfigured } = require("./sentry-init");
 const Sentry = require("@sentry/bun");
 const { App } = require("@slack/bolt");
 const axios = require("axios");
 const qs = require("qs");
 const { initDb, getTokens, saveTokens, logAuditEntry } = require("./db");
 const logger = require("./logger");
-const { sentryConfigured } = require("./sentry-init");
 
 // Configurable API URL (default to production)
 const CARRIER_API_URL =
