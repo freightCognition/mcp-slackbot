@@ -1,7 +1,9 @@
+require("dotenv").config();
+const { sentryConfigured } = require("./sentry-init");
+const Sentry = require("@sentry/bun");
 const { App } = require("@slack/bolt");
 const axios = require("axios");
 const qs = require("qs");
-require("dotenv").config();
 const { initDb, getTokens, saveTokens, logAuditEntry } = require("./db");
 const logger = require("./logger");
 
@@ -72,6 +74,7 @@ const slackApp = new App({
           timestamp: new Date().toISOString(),
           socketMode: true,
           database: dbAvailable ? "connected" : "unavailable",
+          sentry: sentryConfigured() ? "ok" : "unconfigured",
         };
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(health));
@@ -280,6 +283,18 @@ async function apiCall(endpoint, params = {}, method = "POST") {
         { err: error, endpoint, responseData: error.response?.data },
         "API call failed",
       );
+      // 404s are expected for invalid DOT numbers — don't page Sentry on them
+      if (error.response?.status !== 404) {
+        const safeResponse = {
+          status: error.response?.status,
+          code: error.response?.data?.code,
+          message: error.response?.data?.message,
+        };
+        Sentry.captureException(error, {
+          tags: { endpoint, status: error.response?.status },
+          extra: { response: safeResponse },
+        });
+      }
       return {
         success: false,
         error: error.response?.status === 404 ? "not_found" : "api_error",
@@ -2074,12 +2089,14 @@ async function startServer() {
 
 slackApp.error(async (error) => {
   logger.error({ err: error }, "Unhandled Slack Bolt error");
+  Sentry.captureException(error, { tags: { source: "slack-bolt" } });
 });
 
 async function gracefulShutdown(signal) {
   logger.info({ signal }, "Received shutdown signal, closing gracefully");
   try {
     await slackApp.stop();
+    await Sentry.close(2000);
   } catch (err) {
     logger.error({ err }, "Error during graceful shutdown");
   }
@@ -2088,14 +2105,24 @@ async function gracefulShutdown(signal) {
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
-process.on("unhandledRejection", (reason) => {
-  logger.error({ err: reason }, "Unhandled promise rejection");
+async function flushAndExit(reason, source) {
+  Sentry.captureException(reason, { tags: { source } });
+  try {
+    await Sentry.close(2000);
+  } catch (closeErr) {
+    logger.error({ err: closeErr, source }, "Sentry.close failed during fatal handler");
+  }
   process.exit(1);
+}
+
+process.on("unhandledRejection", async (reason) => {
+  logger.error({ err: reason }, "Unhandled promise rejection");
+  await flushAndExit(reason, "unhandledRejection");
 });
 
-process.on("uncaughtException", (err) => {
+process.on("uncaughtException", async (err) => {
   logger.error({ err }, "Uncaught exception");
-  process.exit(1);
+  await flushAndExit(err, "uncaughtException");
 });
 
 // Only start the server when run directly (not imported for testing)
@@ -2132,6 +2159,7 @@ if (typeof module !== "undefined") {
     apiCall,
     fetchCarrierData,
     refreshAccessToken,
+    flushAndExit,
     __getTokensForTest: () => ({
       bearer: BEARER_TOKEN,
       refresh: REFRESH_TOKEN,
