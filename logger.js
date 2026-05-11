@@ -1,5 +1,5 @@
 const pino = require('pino');
-const Sentry = require('@sentry/bun');
+const Sentry = require('@sentry/node');
 const { sentryConfigured } = require('./sentry-init');
 
 function pinoLevelToSentry(level) {

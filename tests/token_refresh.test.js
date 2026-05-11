@@ -1,4 +1,9 @@
-import { describe, it, expect, beforeEach, mock } from "bun:test";
+import { describe, it, expect, beforeEach } from "vitest";
+import {
+  installMockAxios,
+  installMockSlackBolt,
+  installMockDb,
+} from "./helpers/cjs-mocks.js";
 
 // Captured side effects from the mocks
 const axiosPostCalls = [];
@@ -11,42 +16,18 @@ function buildAxiosError(status, data) {
   return err;
 }
 
-// Prevent real Slack connections during import of app.js
-mock.module("@slack/bolt", () => {
-  class MockApp {
-    constructor() {}
-    command() {}
-    action() {}
-    view() {}
-    error() {}
-    async start() {
-      return {};
-    }
-  }
-  return { App: MockApp };
-});
-
-// Stub db.js so refreshAccessToken's saveTokens() is observable and does not
-// require a real LibSQL. getTokens() returns null so loadTokens() will seed
-// from env — though loadTokens is never awaited in this test.
-mock.module(require.resolve("../db"), () => ({
-  db: {},
-  initDb: async () => {},
+installMockSlackBolt();
+installMockDb({
   getTokens: async () => null,
   saveTokens: async (bearer, refresh) => {
     saveTokensCalls.push({ bearer, refresh });
   },
-  logAuditEntry: async () => {},
-  __esModule: true,
-}));
-
-// Axios mock: only .post is exercised by the refresh code paths.
-// Each test pushes canned responses onto axiosPostResponses in call order.
-mock.module(require.resolve("axios"), () => {
-  const mockAxios = async () => {
+});
+installMockAxios({
+  request: async () => {
     throw new Error("axios(config) not configured for this test file");
-  };
-  mockAxios.post = async (url, data, config) => {
+  },
+  post: async (url, data, config) => {
     axiosPostCalls.push({ url, data, config });
     const next = axiosPostResponses.shift();
     if (!next) {
@@ -56,10 +37,7 @@ mock.module(require.resolve("axios"), () => {
     }
     if (next.ok) return { data: next.data };
     throw buildAxiosError(next.status, next.data);
-  };
-  mockAxios.isAxiosError = () => false;
-  mockAxios.create = () => mockAxios;
-  return { default: mockAxios, __esModule: true };
+  },
 });
 
 process.env.BEARER_TOKEN = "test-bearer";

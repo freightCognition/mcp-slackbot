@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 
 const logger = require("../logger");
 const { sanitizeBreadcrumbContext } = logger.__test__;
