@@ -295,7 +295,7 @@ Opens a 4-step wizard modal for the requesting user and broadcasts a risk assess
 - Check container logs: `docker compose logs -f mcpslackbot`
 - Monitor token refresh: `docker logs -f mcpslackbot | grep -i refresh`
 - Health check: `curl http://localhost:3001/health` (reports `sentry: ok | unconfigured` alongside db status)
-- Inspect Sentry events: https://linehaulai.sentry.io/projects/mcp-slackbot-node/
+- Inspect Sentry events: your Sentry project dashboard (see `SENTRY_DSN` in `.env`)
 - Sentry disabled locally? Leave `SENTRY_DSN` empty in `.env` — the app logs a warning and continues without it.
 
 ## Troubleshooting

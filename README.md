@@ -613,7 +613,7 @@ Then update tokens in database (see "Updating Tokens" section).
 ## Security Best Practices
 
 - ✅ **Never commit `.env` files** - Already in `.gitignore`
-- ✅ **Use Docker secrets in production** - Configured in `docker compose.yml`
+- ✅ **Use Docker secrets in production** - Configured in `docker-compose.yml`
 - ✅ **Rotate credentials regularly** - Automatic for access/refresh tokens
 - ✅ **Backup database regularly** - Contains sensitive tokens
 - ✅ **Use `.env.example`** - Never contains real credentials
