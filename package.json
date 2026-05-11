@@ -21,7 +21,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/linehaul.ai/mcp-slackbot.git"
+    "url": "https://github.com/freightcognition/mcp-slackbot.git"
   },
   "license": "MIT",
   "dependencies": {

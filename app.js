@@ -2115,14 +2115,21 @@ async function flushAndExit(reason, source) {
   process.exit(1);
 }
 
-process.on("unhandledRejection", async (reason) => {
+function scheduleFatalExit(reason, source) {
+  flushAndExit(reason, source).catch((handlerErr) => {
+    logger.error({ err: handlerErr, source }, "Fatal handler itself threw");
+    process.exit(1);
+  });
+}
+
+process.on("unhandledRejection", (reason) => {
   logger.error({ err: reason }, "Unhandled promise rejection");
-  await flushAndExit(reason, "unhandledRejection");
+  scheduleFatalExit(reason, "unhandledRejection");
 });
 
-process.on("uncaughtException", async (err) => {
+process.on("uncaughtException", (err) => {
   logger.error({ err }, "Uncaught exception");
-  await flushAndExit(err, "uncaughtException");
+  scheduleFatalExit(err, "uncaughtException");
 });
 
 // Only start the server when run directly (not imported for testing)
