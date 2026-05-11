@@ -285,9 +285,14 @@ async function apiCall(endpoint, params = {}, method = "POST") {
       );
       // 404s are expected for invalid DOT numbers — don't page Sentry on them
       if (error.response?.status !== 404) {
+        const safeResponse = {
+          status: error.response?.status,
+          code: error.response?.data?.code,
+          message: error.response?.data?.message,
+        };
         Sentry.captureException(error, {
           tags: { endpoint, status: error.response?.status },
-          extra: { responseData: error.response?.data },
+          extra: { response: safeResponse },
         });
       }
       return {
@@ -2100,16 +2105,24 @@ async function gracefulShutdown(signal) {
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
-process.on("unhandledRejection", (reason) => {
+async function flushAndExit(reason, source) {
+  Sentry.captureException(reason, { tags: { source } });
+  try {
+    await Sentry.close(2000);
+  } catch (closeErr) {
+    logger.error({ err: closeErr, source }, "Sentry.close failed during fatal handler");
+  }
+  process.exit(1);
+}
+
+process.on("unhandledRejection", async (reason) => {
   logger.error({ err: reason }, "Unhandled promise rejection");
-  Sentry.captureException(reason, { tags: { source: "unhandledRejection" } });
-  Sentry.close(2000).finally(() => process.exit(1));
+  await flushAndExit(reason, "unhandledRejection");
 });
 
-process.on("uncaughtException", (err) => {
+process.on("uncaughtException", async (err) => {
   logger.error({ err }, "Uncaught exception");
-  Sentry.captureException(err, { tags: { source: "uncaughtException" } });
-  Sentry.close(2000).finally(() => process.exit(1));
+  await flushAndExit(err, "uncaughtException");
 });
 
 // Only start the server when run directly (not imported for testing)
@@ -2146,6 +2159,7 @@ if (typeof module !== "undefined") {
     apiCall,
     fetchCarrierData,
     refreshAccessToken,
+    flushAndExit,
     __getTokensForTest: () => ({
       bearer: BEARER_TOKEN,
       refresh: REFRESH_TOKEN,
