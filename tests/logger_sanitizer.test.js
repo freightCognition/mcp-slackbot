@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 const logger = require("../logger");
-const { sanitizeBreadcrumbContext, pinoLevelToSentryLogger } = logger.__test__;
+const { sanitizeBreadcrumbContext, pinoLevelToSentryLogger, sanitizeLogMessage } = logger.__test__;
 
 describe("sanitizeBreadcrumbContext", () => {
   it("returns an empty object for null/undefined input", () => {
@@ -99,6 +99,43 @@ describe("sanitizeBreadcrumbContext", () => {
     const result = sanitizeBreadcrumbContext({ endpoint: null, status: undefined });
     expect(result.endpoint).toBeNull();
     expect(result.status).toBeUndefined();
+  });
+});
+
+describe("sanitizeLogMessage", () => {
+  it("returns empty string for non-string input", () => {
+    expect(sanitizeLogMessage(undefined)).toBe('');
+    expect(sanitizeLogMessage(null)).toBe('');
+    expect(sanitizeLogMessage(42)).toBe('');
+  });
+
+  it("passes through a clean message unchanged", () => {
+    expect(sanitizeLogMessage("carrier lookup succeeded")).toBe("carrier lookup succeeded");
+  });
+
+  it("redacts token=value patterns", () => {
+    expect(sanitizeLogMessage("token=abc123 found")).toBe("token=[redacted] found");
+    expect(sanitizeLogMessage("bearer=eyJhbGc")).toBe("bearer=[redacted]");
+  });
+
+  it("redacts key: value patterns with colon separator", () => {
+    expect(sanitizeLogMessage("password: hunter2")).toBe("password=[redacted]");
+    expect(sanitizeLogMessage("secret: s3cr3t")).toBe("secret=[redacted]");
+  });
+
+  it("redacts multiple sensitive patterns in one message", () => {
+    const result = sanitizeLogMessage("token=abc secret=xyz refreshing");
+    expect(result).toBe("token=[redacted] secret=[redacted] refreshing");
+  });
+
+  it("redacts client_secret and client-secret variants", () => {
+    expect(sanitizeLogMessage("client_secret=s3cr3t")).toBe("client_secret=[redacted]");
+    expect(sanitizeLogMessage("client-secret=s3cr3t")).toBe("client-secret=[redacted]");
+  });
+
+  it("is case-insensitive", () => {
+    expect(sanitizeLogMessage("TOKEN=abc123")).toBe("TOKEN=[redacted]");
+    expect(sanitizeLogMessage("Bearer=xyz")).toBe("Bearer=[redacted]");
   });
 });
 

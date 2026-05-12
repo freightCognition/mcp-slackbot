@@ -43,6 +43,14 @@ const ALLOWED_KEYS = new Set([
 
 const MAX_STRING_LEN = 256;
 
+const SENSITIVE_VALUE_PATTERN =
+  /\b(password|token|secret|api[_-]?key|authorization|cookie|bearer|refresh|client[_-]?secret)\b\s*[:=]\s*\S+/gi;
+
+function sanitizeLogMessage(message) {
+  if (typeof message !== 'string') return '';
+  return message.replace(SENSITIVE_VALUE_PATTERN, '$1=[redacted]');
+}
+
 function sanitizeValue(v) {
   if (v == null) return v;
   if (typeof v === 'string') {
@@ -87,7 +95,7 @@ function addBreadcrumbFromArgs(inputArgs, level) {
   Sentry.addBreadcrumb({
     category: 'log',
     level: pinoLevelToSentry(level),
-    message,
+    message: sanitizeLogMessage(message),
     data,
   });
 }
@@ -117,7 +125,7 @@ const logger = pino({
           } else if (typeof first === 'string') {
             msg = first;
           }
-          Sentry.logger[sentryMethod](msg ?? '', sanitizeBreadcrumbContext(context));
+          Sentry.logger[sentryMethod](sanitizeLogMessage(msg ?? ''), sanitizeBreadcrumbContext(context));
         } catch {
           // Never let Sentry capture break logging
         }
@@ -127,6 +135,6 @@ const logger = pino({
   }
 });
 
-logger.__test__ = { sanitizeBreadcrumbContext, pinoLevelToSentryLogger };
+logger.__test__ = { sanitizeBreadcrumbContext, pinoLevelToSentryLogger, sanitizeLogMessage };
 
 module.exports = logger;
