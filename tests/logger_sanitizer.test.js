@@ -89,6 +89,13 @@ describe("sanitizeBreadcrumbContext", () => {
     }
   });
 
+  it("sanitizes sensitive data in Error.message before forwarding to Sentry", () => {
+    const err = new Error("token=abc123 caused the failure");
+    const result = sanitizeBreadcrumbContext({ err, endpoint: "/x" });
+    expect(result.error_message).toBe("token=[redacted] caused the failure");
+    expect(result.error_message).not.toContain("abc123");
+  });
+
   it("does not throw when the err key holds a non-Error value", () => {
     const result = sanitizeBreadcrumbContext({ err: "plain string", endpoint: "/x" });
     expect(result.endpoint).toBe("/x");
@@ -136,6 +143,26 @@ describe("sanitizeLogMessage", () => {
   it("is case-insensitive", () => {
     expect(sanitizeLogMessage("TOKEN=abc123")).toBe("TOKEN=[redacted]");
     expect(sanitizeLogMessage("Bearer=xyz")).toBe("Bearer=[redacted]");
+  });
+
+  it("redacts Authorization: Bearer <token> header format", () => {
+    expect(sanitizeLogMessage("Authorization: Bearer abc123")).toBe("Authorization=[redacted]");
+    expect(sanitizeLogMessage("authorization: Bearer eyJhbGciOiJIUzI1NiJ9")).toBe("authorization=[redacted]");
+  });
+
+  it("redacts standalone Bearer <token> without a key prefix", () => {
+    expect(sanitizeLogMessage("Bearer abc123")).toBe("Bearer [redacted]");
+    expect(sanitizeLogMessage("token sent as Bearer eyJhbGc")).toBe("token sent as Bearer [redacted]");
+  });
+
+  it("redacts Bearer tokens with quoted values", () => {
+    expect(sanitizeLogMessage("Bearer 'abc123'")).toBe("Bearer [redacted]");
+    expect(sanitizeLogMessage('Bearer "abc123"')).toBe("Bearer [redacted]");
+  });
+
+  it("redacts both header and standalone Bearer tokens in the same message", () => {
+    const result = sanitizeLogMessage("Authorization: Bearer abc123 also Bearer xyz456");
+    expect(result).toBe("Authorization=[redacted] also Bearer [redacted]");
   });
 });
 

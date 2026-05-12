@@ -44,11 +44,15 @@ const ALLOWED_KEYS = new Set([
 const MAX_STRING_LEN = 256;
 
 const SENSITIVE_VALUE_PATTERN =
-  /\b(password|token|secret|api[_-]?key|authorization|cookie|bearer|refresh|client[_-]?secret)\b\s*[:=]\s*\S+/gi;
+  /\b(password|token|secret|api[_-]?key|authorization|cookie|bearer|refresh|client[_-]?secret)\b\s*[:=]\s*(?:bearer\s+['"]?\S+['"]?|\S+)/gi;
+
+const STANDALONE_BEARER_PATTERN = /\bbearer\s+['"]?\S+['"]?/gi;
 
 function sanitizeLogMessage(message) {
   if (typeof message !== 'string') return '';
-  return message.replace(SENSITIVE_VALUE_PATTERN, '$1=[redacted]');
+  return message
+    .replace(SENSITIVE_VALUE_PATTERN, '$1=[redacted]')
+    .replace(STANDALONE_BEARER_PATTERN, 'Bearer [redacted]');
 }
 
 function sanitizeValue(v) {
@@ -66,7 +70,7 @@ function sanitizeBreadcrumbContext(context) {
   for (const [k, v] of Object.entries(context)) {
     if (k === 'err' && v instanceof Error) {
       out.error_name = v.name;
-      out.error_message = v.message;
+      out.error_message = sanitizeLogMessage(v.message);
       continue;
     }
     if (SENSITIVE_KEY_PATTERN.test(k)) {
