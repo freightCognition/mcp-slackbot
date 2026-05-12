@@ -9,6 +9,15 @@ function pinoLevelToSentry(level) {
   return 'debug';
 }
 
+function pinoLevelToSentryLogger(level) {
+  if (level >= 60) return 'fatal';
+  if (level >= 50) return 'error';
+  if (level >= 40) return 'warn';
+  if (level >= 30) return 'info';
+  if (level >= 20) return 'debug';
+  return 'trace';
+}
+
 const SENSITIVE_KEY_PATTERN =
   /(password|token|secret|api[_-]?key|authorization|cookie|cred|bearer|refresh|signing|client[_-]?secret)/i;
 
@@ -34,6 +43,18 @@ const ALLOWED_KEYS = new Set([
 
 const MAX_STRING_LEN = 256;
 
+const SENSITIVE_VALUE_PATTERN =
+  /\b(password|token|secret|api[_-]?key|authorization|cookie|bearer|refresh|client[_-]?secret)\b\s*[:=]\s*(?:bearer\s+['"]?\S+['"]?|\S+)/gi;
+
+const STANDALONE_BEARER_PATTERN = /\bbearer\s+['"]?\S+['"]?/gi;
+
+function sanitizeLogMessage(message) {
+  if (typeof message !== 'string') return '';
+  return message
+    .replace(SENSITIVE_VALUE_PATTERN, '$1=[redacted]')
+    .replace(STANDALONE_BEARER_PATTERN, 'Bearer [redacted]');
+}
+
 function sanitizeValue(v) {
   if (v == null) return v;
   if (typeof v === 'string') {
@@ -49,7 +70,7 @@ function sanitizeBreadcrumbContext(context) {
   for (const [k, v] of Object.entries(context)) {
     if (k === 'err' && v instanceof Error) {
       out.error_name = v.name;
-      out.error_message = v.message;
+      out.error_message = sanitizeLogMessage(v.message);
       continue;
     }
     if (SENSITIVE_KEY_PATTERN.test(k)) {
@@ -78,7 +99,7 @@ function addBreadcrumbFromArgs(inputArgs, level) {
   Sentry.addBreadcrumb({
     category: 'log',
     level: pinoLevelToSentry(level),
-    message,
+    message: sanitizeLogMessage(message),
     data,
   });
 }
@@ -99,8 +120,18 @@ const logger = pino({
       if (sentryConfigured() && level >= 30) {
         try {
           addBreadcrumbFromArgs(inputArgs, level);
+          const sentryMethod = pinoLevelToSentryLogger(level);
+          const [first, second] = inputArgs;
+          let msg, context;
+          if (first && typeof first === 'object' && !Array.isArray(first)) {
+            context = first;
+            msg = typeof second === 'string' ? second : '';
+          } else if (typeof first === 'string') {
+            msg = first;
+          }
+          Sentry.logger[sentryMethod](sanitizeLogMessage(msg ?? ''), sanitizeBreadcrumbContext(context));
         } catch {
-          // Never let breadcrumb capture break logging
+          // Never let Sentry capture break logging
         }
       }
       return method.apply(this, inputArgs);
@@ -108,6 +139,6 @@ const logger = pino({
   }
 });
 
-logger.__test__ = { sanitizeBreadcrumbContext };
+logger.__test__ = { sanitizeBreadcrumbContext, pinoLevelToSentryLogger, sanitizeLogMessage };
 
 module.exports = logger;

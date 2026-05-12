@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 const logger = require("../logger");
-const { sanitizeBreadcrumbContext } = logger.__test__;
+const { sanitizeBreadcrumbContext, pinoLevelToSentryLogger, sanitizeLogMessage } = logger.__test__;
 
 describe("sanitizeBreadcrumbContext", () => {
   it("returns an empty object for null/undefined input", () => {
@@ -89,6 +89,13 @@ describe("sanitizeBreadcrumbContext", () => {
     }
   });
 
+  it("sanitizes sensitive data in Error.message before forwarding to Sentry", () => {
+    const err = new Error("token=abc123 caused the failure");
+    const result = sanitizeBreadcrumbContext({ err, endpoint: "/x" });
+    expect(result.error_message).toBe("token=[redacted] caused the failure");
+    expect(result.error_message).not.toContain("abc123");
+  });
+
   it("does not throw when the err key holds a non-Error value", () => {
     const result = sanitizeBreadcrumbContext({ err: "plain string", endpoint: "/x" });
     expect(result.endpoint).toBe("/x");
@@ -99,5 +106,73 @@ describe("sanitizeBreadcrumbContext", () => {
     const result = sanitizeBreadcrumbContext({ endpoint: null, status: undefined });
     expect(result.endpoint).toBeNull();
     expect(result.status).toBeUndefined();
+  });
+});
+
+describe("sanitizeLogMessage", () => {
+  it("returns empty string for non-string input", () => {
+    expect(sanitizeLogMessage(undefined)).toBe('');
+    expect(sanitizeLogMessage(null)).toBe('');
+    expect(sanitizeLogMessage(42)).toBe('');
+  });
+
+  it("passes through a clean message unchanged", () => {
+    expect(sanitizeLogMessage("carrier lookup succeeded")).toBe("carrier lookup succeeded");
+  });
+
+  it("redacts token=value patterns", () => {
+    expect(sanitizeLogMessage("token=abc123 found")).toBe("token=[redacted] found");
+    expect(sanitizeLogMessage("bearer=eyJhbGc")).toBe("bearer=[redacted]");
+  });
+
+  it("redacts key: value patterns with colon separator", () => {
+    expect(sanitizeLogMessage("password: hunter2")).toBe("password=[redacted]");
+    expect(sanitizeLogMessage("secret: s3cr3t")).toBe("secret=[redacted]");
+  });
+
+  it("redacts multiple sensitive patterns in one message", () => {
+    const result = sanitizeLogMessage("token=abc secret=xyz refreshing");
+    expect(result).toBe("token=[redacted] secret=[redacted] refreshing");
+  });
+
+  it("redacts client_secret and client-secret variants", () => {
+    expect(sanitizeLogMessage("client_secret=s3cr3t")).toBe("client_secret=[redacted]");
+    expect(sanitizeLogMessage("client-secret=s3cr3t")).toBe("client-secret=[redacted]");
+  });
+
+  it("is case-insensitive", () => {
+    expect(sanitizeLogMessage("TOKEN=abc123")).toBe("TOKEN=[redacted]");
+    expect(sanitizeLogMessage("Bearer=xyz")).toBe("Bearer=[redacted]");
+  });
+
+  it("redacts Authorization: Bearer <token> header format", () => {
+    expect(sanitizeLogMessage("Authorization: Bearer abc123")).toBe("Authorization=[redacted]");
+    expect(sanitizeLogMessage("authorization: Bearer eyJhbGciOiJIUzI1NiJ9")).toBe("authorization=[redacted]");
+  });
+
+  it("redacts standalone Bearer <token> without a key prefix", () => {
+    expect(sanitizeLogMessage("Bearer abc123")).toBe("Bearer [redacted]");
+    expect(sanitizeLogMessage("token sent as Bearer eyJhbGc")).toBe("token sent as Bearer [redacted]");
+  });
+
+  it("redacts Bearer tokens with quoted values", () => {
+    expect(sanitizeLogMessage("Bearer 'abc123'")).toBe("Bearer [redacted]");
+    expect(sanitizeLogMessage('Bearer "abc123"')).toBe("Bearer [redacted]");
+  });
+
+  it("redacts both header and standalone Bearer tokens in the same message", () => {
+    const result = sanitizeLogMessage("Authorization: Bearer abc123 also Bearer xyz456");
+    expect(result).toBe("Authorization=[redacted] also Bearer [redacted]");
+  });
+});
+
+describe("pinoLevelToSentryLogger", () => {
+  it("maps standard Pino levels to Sentry logger method names", () => {
+    expect(pinoLevelToSentryLogger(10)).toBe("trace");
+    expect(pinoLevelToSentryLogger(20)).toBe("debug");
+    expect(pinoLevelToSentryLogger(30)).toBe("info");
+    expect(pinoLevelToSentryLogger(40)).toBe("warn");
+    expect(pinoLevelToSentryLogger(50)).toBe("error");
+    expect(pinoLevelToSentryLogger(60)).toBe("fatal");
   });
 });

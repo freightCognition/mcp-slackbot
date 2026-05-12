@@ -149,12 +149,24 @@ function normalizeNullableText(value, fallback = "") {
   return text;
 }
 
+function sanitizeHrefForSlack(url) {
+  if (typeof url !== "string") return "";
+  const trimmed = url.trim();
+  if (/^tel:/i.test(trimmed)) {
+    const rest = trimmed.slice(4);
+    const hasPlus = rest.trimStart().startsWith("+");
+    const digits = rest.replace(/\D/g, "");
+    return `tel:${hasPlus ? "+" : ""}${digits}`;
+  }
+  return trimmed;
+}
+
 function formatSlackLinks(text) {
   const input = normalizeNullableText(text, "");
   if (!input) return "";
   const withSlackLinks = input.replace(
     /<a\s+[^>]*href=["']([^"']+)["'][^>]*>(.*?)<\/a>/gi,
-    (_match, url, label) => `<${url}|${label}>`,
+    (_match, url, label) => `<${sanitizeHrefForSlack(url)}|${label}>`,
   );
   return withSlackLinks.replace(/<([^>\s]+)([^>]*)>/g, (match, token) => {
     const lower = token.toLowerCase();
@@ -2146,6 +2158,7 @@ if (typeof module !== "undefined") {
     getRiskLevelEmoji,
     getRiskLevel,
     normalizeNullableText,
+    sanitizeHrefForSlack,
     formatSlackLinks,
     formatInfractionLine,
     chunkLines,

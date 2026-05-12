@@ -56,12 +56,29 @@ export function installMockSlackBolt() {
   return installCachedModule("@slack/bolt", { App: MockApp });
 }
 
+const SENTRY_LOGGER_NOOP = {
+  trace: () => {}, debug: () => {}, info: () => {},
+  warn: () => {}, error: () => {}, fatal: () => {},
+};
+
 export function installMockSentryNode(impl) {
   return installCachedModule("@sentry/node", {
     init: impl.init ?? (() => {}),
     addBreadcrumb: impl.addBreadcrumb ?? (() => {}),
     captureException: impl.captureException ?? (() => {}),
     close: impl.close ?? (() => Promise.resolve(true)),
+    logger: impl.logger ?? SENTRY_LOGGER_NOOP,
+  });
+}
+
+export function installMockSentryInit(impl = {}) {
+  return installCachedModule("./sentry-init", {
+    sentryConfigured: impl.sentryConfigured ?? (() => false),
+    clampSampleRate: impl.clampSampleRate ?? ((v, f = 1.0) => {
+      const p = parseFloat(v);
+      const n = Number.isFinite(p) ? p : f;
+      return Math.max(0, Math.min(1, n));
+    }),
   });
 }
 
