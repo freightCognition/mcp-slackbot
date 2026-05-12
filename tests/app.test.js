@@ -18,6 +18,7 @@ const {
   getRiskLevelEmoji,
   getRiskLevel,
   normalizeNullableText,
+  sanitizeHrefForSlack,
   formatSlackLinks,
   chunkLines,
   hasActiveAssessment,
@@ -289,6 +290,51 @@ describe("formatSlackLinks", () => {
   });
   it("handles empty string", () => {
     expect(formatSlackLinks("")).toBe("");
+  });
+  it("sanitizes tel: hrefs containing spaces and parens", () => {
+    expect(
+      formatSlackLinks(
+        'Phone Number <a href="tel:(916) 363-3115">(916) 363-3115</a> matched by 7 carriers.',
+      ),
+    ).toBe("Phone Number <tel:9163633115|(916) 363-3115> matched by 7 carriers.");
+  });
+  it("preserves leading + on tel: hrefs", () => {
+    expect(
+      formatSlackLinks('<a href="tel:+1 (916) 363-3115">(916) 363-3115</a>'),
+    ).toBe("<tel:+19163633115|(916) 363-3115>");
+  });
+  it("passes already-clean tel: hrefs through unchanged", () => {
+    expect(formatSlackLinks('<a href="tel:9163633115">call</a>')).toBe(
+      "<tel:9163633115|call>",
+    );
+  });
+  it("does not mangle mailto: hrefs", () => {
+    expect(formatSlackLinks('<a href="mailto:x@y.com">email</a>')).toBe(
+      "<mailto:x@y.com|email>",
+    );
+  });
+});
+
+describe("sanitizeHrefForSlack", () => {
+  it("strips spaces, parens, and dashes from tel: URLs", () => {
+    expect(sanitizeHrefForSlack("tel:(916) 363-3115")).toBe("tel:9163633115");
+  });
+  it("preserves leading + on tel: URLs", () => {
+    expect(sanitizeHrefForSlack("tel:+1 (916) 363-3115")).toBe(
+      "tel:+19163633115",
+    );
+  });
+  it("leaves non-tel URLs untouched", () => {
+    expect(sanitizeHrefForSlack("https://example.com/foo?a=b")).toBe(
+      "https://example.com/foo?a=b",
+    );
+    expect(sanitizeHrefForSlack("mailto:user@example.com")).toBe(
+      "mailto:user@example.com",
+    );
+  });
+  it("returns empty string for non-string input", () => {
+    expect(sanitizeHrefForSlack(null)).toBe("");
+    expect(sanitizeHrefForSlack(undefined)).toBe("");
   });
 });
 
