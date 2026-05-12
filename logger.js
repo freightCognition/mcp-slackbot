@@ -9,6 +9,15 @@ function pinoLevelToSentry(level) {
   return 'debug';
 }
 
+function pinoLevelToSentryLogger(level) {
+  if (level >= 60) return 'fatal';
+  if (level >= 50) return 'error';
+  if (level >= 40) return 'warn';
+  if (level >= 30) return 'info';
+  if (level >= 20) return 'debug';
+  return 'trace';
+}
+
 const SENSITIVE_KEY_PATTERN =
   /(password|token|secret|api[_-]?key|authorization|cookie|cred|bearer|refresh|signing|client[_-]?secret)/i;
 
@@ -99,8 +108,18 @@ const logger = pino({
       if (sentryConfigured() && level >= 30) {
         try {
           addBreadcrumbFromArgs(inputArgs, level);
+          const sentryMethod = pinoLevelToSentryLogger(level);
+          const [first, second] = inputArgs;
+          let msg, context;
+          if (first && typeof first === 'object' && !Array.isArray(first)) {
+            context = first;
+            msg = typeof second === 'string' ? second : '';
+          } else if (typeof first === 'string') {
+            msg = first;
+          }
+          Sentry.logger[sentryMethod](msg ?? '', sanitizeBreadcrumbContext(context));
         } catch {
-          // Never let breadcrumb capture break logging
+          // Never let Sentry capture break logging
         }
       }
       return method.apply(this, inputArgs);
@@ -108,6 +127,6 @@ const logger = pino({
   }
 });
 
-logger.__test__ = { sanitizeBreadcrumbContext };
+logger.__test__ = { sanitizeBreadcrumbContext, pinoLevelToSentryLogger };
 
 module.exports = logger;

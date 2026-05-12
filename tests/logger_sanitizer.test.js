@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 const logger = require("../logger");
-const { sanitizeBreadcrumbContext } = logger.__test__;
+const { sanitizeBreadcrumbContext, pinoLevelToSentryLogger } = logger.__test__;
 
 describe("sanitizeBreadcrumbContext", () => {
   it("returns an empty object for null/undefined input", () => {
@@ -99,5 +99,16 @@ describe("sanitizeBreadcrumbContext", () => {
     const result = sanitizeBreadcrumbContext({ endpoint: null, status: undefined });
     expect(result.endpoint).toBeNull();
     expect(result.status).toBeUndefined();
+  });
+});
+
+describe("pinoLevelToSentryLogger", () => {
+  it("maps standard Pino levels to Sentry logger method names", () => {
+    expect(pinoLevelToSentryLogger(10)).toBe("trace");
+    expect(pinoLevelToSentryLogger(20)).toBe("debug");
+    expect(pinoLevelToSentryLogger(30)).toBe("info");
+    expect(pinoLevelToSentryLogger(40)).toBe("warn");
+    expect(pinoLevelToSentryLogger(50)).toBe("error");
+    expect(pinoLevelToSentryLogger(60)).toBe("fatal");
   });
 });
