@@ -32,7 +32,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Lint + test must pass before we touch production. Reuses ci.yml so the gate
+  # is defined once. A red master never deploys.
+  verify:
+    if: github.repository == 'freightCognition/mcp-slackbot' && github.event.repository.fork == false
+    uses: ./.github/workflows/ci.yml
+
   deploy:
+    needs: verify
     if: github.ref == 'refs/heads/master' && github.repository == 'freightCognition/mcp-slackbot' && github.event.repository.fork == false
     runs-on: self-hosted
     environment: production
@@ -44,26 +51,68 @@ jobs:
           persist-credentials: false
 
       - name: Write .env for Compose
+        # Secrets are passed via env (not interpolated into the script text) so
+        # values containing quotes, $, backticks or newlines can't break .env.
+        env:
+          BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
+          REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
+          TOKEN_ENDPOINT_URL: ${{ secrets.TOKEN_ENDPOINT_URL }}
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          SLACK_APP_TOKEN: ${{ secrets.SLACK_APP_TOKEN }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_SIGNING_SECRET: ${{ secrets.SLACK_SIGNING_SECRET }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_ENVIRONMENT: ${{ vars.SENTRY_ENVIRONMENT || 'production' }}
+          SENTRY_RELEASE: ${{ github.sha }}
+          SENTRY_TRACES_SAMPLE_RATE: ${{ vars.SENTRY_TRACES_SAMPLE_RATE || '1.0' }}
         run: |
           set -euo pipefail
           umask 077
           {
-            echo "BEARER_TOKEN=${{ secrets.BEARER_TOKEN }}"
-            echo "REFRESH_TOKEN=${{ secrets.REFRESH_TOKEN }}"
-            echo "TOKEN_ENDPOINT_URL=${{ secrets.TOKEN_ENDPOINT_URL }}"
-            echo "CLIENT_ID=${{ secrets.CLIENT_ID }}"
-            echo "CLIENT_SECRET=${{ secrets.CLIENT_SECRET }}"
-            echo "SLACK_APP_TOKEN=${{ secrets.SLACK_APP_TOKEN }}"
-            echo "SLACK_BOT_TOKEN=${{ secrets.SLACK_BOT_TOKEN }}"
-            echo "SLACK_SIGNING_SECRET=${{ secrets.SLACK_SIGNING_SECRET }}"
-            echo "SENTRY_DSN=${{ secrets.SENTRY_DSN }}"
-            echo "SENTRY_ENVIRONMENT=${{ vars.SENTRY_ENVIRONMENT || 'production' }}"
-            echo "SENTRY_RELEASE=${{ github.sha }}"
-            echo "SENTRY_TRACES_SAMPLE_RATE=${{ vars.SENTRY_TRACES_SAMPLE_RATE || '1.0' }}"
+            echo "BEARER_TOKEN=${BEARER_TOKEN}"
+            echo "REFRESH_TOKEN=${REFRESH_TOKEN}"
+            echo "TOKEN_ENDPOINT_URL=${TOKEN_ENDPOINT_URL}"
+            echo "CLIENT_ID=${CLIENT_ID}"
+            echo "CLIENT_SECRET=${CLIENT_SECRET}"
+            echo "SLACK_APP_TOKEN=${SLACK_APP_TOKEN}"
+            echo "SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}"
+            echo "SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET}"
+            echo "SENTRY_DSN=${SENTRY_DSN}"
+            echo "SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT}"
+            echo "SENTRY_RELEASE=${SENTRY_RELEASE}"
+            echo "SENTRY_TRACES_SAMPLE_RATE=${SENTRY_TRACES_SAMPLE_RATE}"
           } > .env
 
       - name: Build and start stack
         run: docker compose -f docker-compose.yml -f docker-compose.runner.yml up -d --build
+
+      - name: Verify container health
+        # The image ships a Docker HEALTHCHECK (wget on :3001/health). Poll the
+        # container's health status so a broken deploy fails the job instead of
+        # silently reporting success.
+        run: |
+          set -euo pipefail
+          cid="$(docker compose -f docker-compose.yml -f docker-compose.runner.yml ps -q mcpslackbot)"
+          if [ -z "$cid" ]; then
+            echo "mcpslackbot container not found"; exit 1
+          fi
+          for i in $(seq 1 30); do
+            status="$(docker inspect -f '{{ if .State.Health }}{{ .State.Health.Status }}{{ else }}none{{ end }}' "$cid")"
+            echo "attempt $i: health=$status"
+            case "$status" in
+              healthy) echo "container healthy"; exit 0 ;;
+              unhealthy) echo "container unhealthy"; docker logs --tail=80 "$cid"; exit 1 ;;
+            esac
+            sleep 5
+          done
+          echo "timed out waiting for healthy status"
+          docker logs --tail=80 "$cid"
+          exit 1
+
+      - name: Prune dangling images
+        if: success()
+        run: docker image prune -f
 
       - name: Remove .env from workspace
         if: always()
