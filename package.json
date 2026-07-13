@@ -1,6 +1,6 @@
 {
   "name": "mcp-slackbot",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "linehaul.ai open-source app to execute Carrier Risk Assessments, with the MyCarrierPortal API, from within your Slack environment.",
   "main": "app.js",
   "scripts": {
