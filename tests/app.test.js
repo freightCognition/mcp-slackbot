@@ -18,6 +18,7 @@ const {
   getRiskLevelEmoji,
   getRiskLevel,
   normalizeNullableText,
+  normalizeMcInput,
   sanitizeHrefForSlack,
   formatSlackLinks,
   chunkLines,
@@ -453,8 +454,8 @@ describe("Wizard View Builders - null state handling", () => {
 });
 
 describe("MC number input normalization", () => {
-  // Mirrors the normalization logic in the /risk command handler
-  const normalizeMcInput = (text) => text.trim().replace(/^mc/i, "");
+  // Imports the real normalization from the /risk command handler so the
+  // test cannot pass while production diverges.
   const isValidMcNumber = (mc) => /^\d{1,8}$/.test(mc);
 
   it("accepts plain numeric input", () => {
@@ -482,6 +483,29 @@ describe("MC number input normalization", () => {
     expect(isValidMcNumber(normalizeMcInput("  MC123456  "))).toBe(true);
   });
 
+  // Regression: separators between the "MC" token and the digits were left
+  // behind by the old `replace(/^mc/i, "")`, causing valid MC numbers to be
+  // rejected as invalid. See docker/Slack logs from 2026-07-09.
+  it("strips hyphen after MC prefix (MC-123456)", () => {
+    expect(normalizeMcInput("MC-1590727")).toBe("1590727");
+    expect(isValidMcNumber(normalizeMcInput("MC-1590727"))).toBe(true);
+  });
+
+  it("strips space after MC prefix (MC 123456)", () => {
+    expect(normalizeMcInput("MC 1590727")).toBe("1590727");
+    expect(isValidMcNumber(normalizeMcInput("MC 1590727"))).toBe(true);
+  });
+
+  it("strips hash after MC prefix (MC#123456)", () => {
+    expect(normalizeMcInput("MC#1590727")).toBe("1590727");
+    expect(isValidMcNumber(normalizeMcInput("MC#1590727"))).toBe(true);
+  });
+
+  it("strips colon after MC prefix (MC:123456)", () => {
+    expect(normalizeMcInput("MC:1590727")).toBe("1590727");
+    expect(isValidMcNumber(normalizeMcInput("MC:1590727"))).toBe(true);
+  });
+
   it("rejects non-numeric input after prefix strip", () => {
     expect(isValidMcNumber(normalizeMcInput("MCabc"))).toBe(false);
   });
@@ -492,5 +516,10 @@ describe("MC number input normalization", () => {
 
   it("rejects empty input after trim", () => {
     expect(isValidMcNumber(normalizeMcInput("MC"))).toBe(false);
+  });
+
+  it("handles null/undefined input without throwing", () => {
+    expect(normalizeMcInput(null)).toBe("");
+    expect(normalizeMcInput(undefined)).toBe("");
   });
 });

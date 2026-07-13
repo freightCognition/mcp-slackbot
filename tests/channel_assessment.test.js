@@ -101,12 +101,29 @@ describe("buildChannelAssessmentBlocks", () => {
     expect(blocks[0].text.text).toContain("TEST TRUCKING LLC");
   });
 
-  it("handles missing risk data gracefully", () => {
+  it("surfaces missing risk data instead of a misleading low score", () => {
+    // Regression: when RiskAssessmentDetails is absent, TotalPoints is undefined.
+    // Previously this defaulted to 0 and rendered as "🟢 Low", publicly labeling
+    // an unavailable assessment as a favorable result. It must now be explicit.
     const noRiskData = { CompanyName: "NO RISK CARRIER" };
     const blocks = buildChannelAssessmentBlocks(noRiskData, "000000", "U12345");
+    expect(blocks[2].text.text).toContain("⚠️");
+    expect(blocks[2].text.text).toContain("unavailable");
+    expect(blocks[2].text.text).not.toContain("🟢");
+    expect(blocks[2].text.text).not.toContain("(0 pts)");
+    expect(blocks[3].elements[0].text).toBe("No risk data available");
+  });
+
+  it("renders a genuine zero-point score as low risk (not unavailable)", () => {
+    const zeroRisk = {
+      CompanyName: "CLEAN CARRIER",
+      RiskAssessmentDetails: { TotalPoints: 0 },
+    };
+    const blocks = buildChannelAssessmentBlocks(zeroRisk, "000000", "U12345");
     expect(blocks[2].text.text).toContain("🟢");
     expect(blocks[2].text.text).toContain("Low");
-    expect(blocks[3].elements[0].text).toBe("No risk data available");
+    expect(blocks[2].text.text).toContain("(0 pts)");
+    expect(blocks[2].text.text).not.toContain("unavailable");
   });
 
   it("handles missing company name", () => {

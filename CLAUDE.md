@@ -6,7 +6,7 @@
 
 **Author**: Anthony Fecarotta (freightCognition & linehaul.ai)
 **License**: MIT
-**Version**: 3.0.0
+**Version**: 3.0.1
 **Repository**: https://github.com/freightcognition/risk-slackbot
 
 ## Architecture
