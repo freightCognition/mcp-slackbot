@@ -11,13 +11,13 @@ A Slack bot for executing Carrier Risk Assessments using the MyCarrierPortal API
 - Docker and Docker Compose (Recommended)
 - A Slack workspace with permissions to add apps
 - MyCarrierPortal API access (including Bearer Token, Refresh Token, and Token Endpoint URL)
-- Bun >= 1.0.0 (if not using Docker)
+- Node.js >= 22.0.0 (if not using Docker)
 
 ## Architecture
 
 This application uses a **dual-container architecture** with Docker Compose and connects to Slack via **Bolt Socket Mode**:
 
-- **mcpslackbot**: Bun application running the Slack Bolt Socket Mode client and MyCarrierPortal API integration
+- **mcpslackbot**: Node.js application running the Slack Bolt Socket Mode client and MyCarrierPortal API integration
 - **libsql**: Database server (Turso libSQL) for persistent token storage
 
 Token persistence ensures OAuth refresh tokens survive container restarts and enables automatic token rotation without manual intervention.
@@ -74,7 +74,7 @@ docker compose up -d
 
 This command will:
 1. Pull the libSQL server image
-2. Build the Bun application image
+2. Build the Node.js application image
 3. Create a persistent volume for token storage
 4. Start both containers in the background
 
@@ -302,17 +302,17 @@ The database will be recreated and seeded with the new tokens.
 
 ## Alternative Deployment Methods (Without Docker)
 
-If you prefer not to use Docker, you can run the application directly with Bun. **Note:** You'll need to run your own libSQL server or modify the code to use a different database.
+If you prefer not to use Docker, you can run the application directly with Node.js. **Note:** You'll need to run your own libSQL server or modify the code to use a different database.
 
 ### Prerequisites for Direct Deployment
-- Bun >= 1.0.0
+- Node.js >= 22.0.0
 - libSQL server running (or modify code for different database)
 
 ### Setup and Running
 
 1. **Install dependencies:**
    ```bash
-   bun install
+   pnpm install --frozen-lockfile
    ```
 
 2. **Configure environment variables:**
@@ -326,16 +326,16 @@ If you prefer not to use Docker, you can run the application directly with Bun. 
 
 4. **Run the application:**
    ```bash
-   # Development mode
-   bun run dev
+   # Development mode (auto-restart on changes)
+   pnpm dev
 
    # Production mode
-   bun start
+   pnpm start
 
    # Or with PM2
-   bun run pm2:start
-   bun run pm2:logs
-   bun run pm2:stop
+   pnpm pm2:start
+   pnpm pm2:logs
+   pnpm pm2:stop
    ```
 
 ## Slack App Configuration
@@ -403,14 +403,14 @@ The project includes comprehensive test scripts for verifying functionality.
 ### Available Test Scripts
 
 ```bash
-# Run all tests
-bun test
+# Run all tests (vitest)
+pnpm test
 
 # Test bearer token against API
-bun run test:token
+pnpm test:token
 
 # Test refresh token functionality
-bun run test:refresh
+pnpm test:refresh
 ```
 
 ### Testing Refresh Token with Docker Compose
@@ -613,7 +613,7 @@ Then update tokens in database (see "Updating Tokens" section).
 ## Security Best Practices
 
 - ✅ **Never commit `.env` files** - Already in `.gitignore`
-- ✅ **Use Docker secrets in production** - Configured in `docker compose.yml`
+- ✅ **Use Docker secrets in production** - Configured in `docker-compose.yml`
 - ✅ **Rotate credentials regularly** - Automatic for access/refresh tokens
 - ✅ **Backup database regularly** - Contains sensitive tokens
 - ✅ **Use `.env.example`** - Never contains real credentials

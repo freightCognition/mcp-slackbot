@@ -6,6 +6,10 @@
 #   BEARER_TOKEN, REFRESH_TOKEN, TOKEN_ENDPOINT_URL, CLIENT_ID, CLIENT_SECRET,
 #   SLACK_APP_TOKEN, SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET
 #
+# Optional repository secrets/variables for Sentry:
+#   SENTRY_DSN (secret), SENTRY_ENVIRONMENT (var), SENTRY_TRACES_SAMPLE_RATE (var)
+#   DSN source: your Sentry project (get DSN at https://sentry.io/settings/projects/).
+#
 # Hardening (recommended in GitHub UI):
 #   - Settings → Environments → production: restrict deployment branches to `socket-mode`,
 #     add required reviewers and/or wait timer so deploys need explicit approval.
@@ -52,6 +56,10 @@ jobs:
             echo "SLACK_APP_TOKEN=${{ secrets.SLACK_APP_TOKEN }}"
             echo "SLACK_BOT_TOKEN=${{ secrets.SLACK_BOT_TOKEN }}"
             echo "SLACK_SIGNING_SECRET=${{ secrets.SLACK_SIGNING_SECRET }}"
+            echo "SENTRY_DSN=${{ secrets.SENTRY_DSN }}"
+            echo "SENTRY_ENVIRONMENT=${{ vars.SENTRY_ENVIRONMENT || 'production' }}"
+            echo "SENTRY_RELEASE=${{ github.sha }}"
+            echo "SENTRY_TRACES_SAMPLE_RATE=${{ vars.SENTRY_TRACES_SAMPLE_RATE || '1.0' }}"
           } > .env
 
       - name: Build and start stack

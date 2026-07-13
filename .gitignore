@@ -87,9 +87,7 @@ postman/**/*.json
 .auto-claude/
 .codex/
 
-docs/
+
 thoughts/
 mcp-slackbot.tar
-AGENTS.md
-CLAUDE.md
 .cursor/
