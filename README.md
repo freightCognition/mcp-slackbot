@@ -660,7 +660,7 @@ crontab -e
 
 ## License
 
-This project is licensed under version 3 of the GNU Affero General Public License (AGPL-3.0). See the `LICENSE.TXT` file for details.
+This project is licensed under the MIT License. See the [`LICENSE`](LICENSE) file for details.
 
 ## Support
 

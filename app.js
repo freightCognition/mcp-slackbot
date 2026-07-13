@@ -140,6 +140,23 @@ function getRiskLevel(points) {
   }
 }
 
+// True only when a numeric risk score is actually present. Guards against
+// treating a missing assessment (null/undefined TotalPoints) as a real score,
+// which would otherwise fall through to a misleading "Fail (0 pts)" or "Low".
+function isRiskPointsAvailable(points) {
+  return points !== null && points !== undefined && Number.isFinite(Number(points));
+}
+
+// Formats an overall/category risk score for display, or a clear
+// "data unavailable" notice when the score is missing.
+function formatRiskLevel(points) {
+  if (!isRiskPointsAvailable(points)) {
+    return "⚠️ Risk data unavailable";
+  }
+  const pts = Number(points);
+  return `${getRiskLevelEmoji(pts)} ${getRiskLevel(pts)} (${pts} pts)`;
+}
+
 function normalizeNullableText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
   const text = String(value).trim();
@@ -362,9 +379,9 @@ async function fetchCarrierData(mcNumber) {
     DBAName: profile?.Identity?.dbaName || null,
     DotNumber: profile?.dotNumber?.Value || riskData?.DOTNumber || "N/A",
     DocketNumber: profile?.docketNumber || riskData?.DocketNumber || mcNumber,
-    TrucksTotal: profile?.Equipment?.trucksTotal || "N/A",
-    DriversTotal: profile?.Drivers?.driversTotal || "N/A",
-    PowerUnits: profile?.Equipment?.totalPower || "N/A",
+    TrucksTotal: profile?.Equipment?.trucksTotal ?? "N/A",
+    DriversTotal: profile?.Drivers?.driversTotal ?? "N/A",
+    PowerUnits: profile?.Equipment?.totalPower ?? "N/A",
     Phone: profile?.Identity?.businessPhone || "N/A",
     City: profile?.Identity?.businessCity || "N/A",
     State: profile?.Identity?.businessState || "N/A",
@@ -417,12 +434,12 @@ function generateWizardId() {
   return `wiz_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
-function buildLoadingView(mcNumber) {
+function buildLoadingView(mcNumber, channelId = null) {
   return {
     type: "modal",
     callback_id: "carrier_wizard_loading",
     notify_on_close: true,
-    private_metadata: JSON.stringify({ mcNumber }),
+    private_metadata: JSON.stringify({ mcNumber, channelId }),
     title: { type: "plain_text", text: "Carrier Assessment", emoji: true },
     close: { type: "plain_text", text: "Cancel", emoji: true },
     blocks: [
@@ -468,9 +485,11 @@ function buildChannelAssessmentBlocks(carrierData, mcNumber, userId) {
   const trucksTotal = normalizeNullableText(data.TrucksTotal, "N/A");
   const driversTotal = normalizeNullableText(data.DriversTotal, "N/A");
 
-  const totalPoints = risk.TotalPoints || 0;
-  const overallEmoji = getRiskLevelEmoji(totalPoints);
-  const overallLevel = getRiskLevel(totalPoints);
+  const riskAvailable = isRiskPointsAvailable(risk.TotalPoints);
+  const totalPoints = riskAvailable ? Number(risk.TotalPoints) : null;
+  const overallText = riskAvailable
+    ? `${getRiskLevelEmoji(totalPoints)} *Risk Assessment: ${getRiskLevel(totalPoints)}* (${totalPoints} pts)`
+    : "⚠️ *Risk Assessment: Data unavailable*";
 
   const categories = ["Authority", "Insurance", "Operation", "Safety", "Other"];
   const categoryLine = categories
@@ -502,7 +521,7 @@ function buildChannelAssessmentBlocks(carrierData, mcNumber, userId) {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `${overallEmoji} *Risk Assessment: ${overallLevel}* (${totalPoints} pts)`,
+        text: overallText,
       },
     },
     {
@@ -589,7 +608,7 @@ function buildStep1View(carrierData, mcNumber, channelId, wizardId = null) {
         },
         {
           type: "mrkdwn",
-          text: `${getRiskLevelEmoji(risk.TotalPoints)} ${getRiskLevel(risk.TotalPoints)} (${risk.TotalPoints || 0} pts)`,
+          text: formatRiskLevel(risk.TotalPoints),
         },
       ],
     },
@@ -611,7 +630,7 @@ function buildStep1View(carrierData, mcNumber, channelId, wizardId = null) {
         },
         {
           type: "mrkdwn",
-          text: `${getRiskLevelEmoji(categoryData.TotalPoints)} ${getRiskLevel(categoryData.TotalPoints)} (${categoryData.TotalPoints || 0} pts)${countText}`,
+          text: `${formatRiskLevel(categoryData.TotalPoints)}${countText}`,
         },
       ];
     })
@@ -1022,10 +1041,15 @@ function buildStep4View(wizardId, contacts = [], options = {}) {
   }
 
   // Contact selection - API returns FirstName, LastName, Email
+  // Slack caps option values at 75 chars, so we store a short option ID and
+  // resolve it back to the full email from wizard state on selection. Storing
+  // the (possibly >75 char) email directly as the value would truncate it and
+  // send the invite to the wrong address.
+  const contactEmails = {};
   const contactOptions = (contacts || [])
     .slice(0, 10)
     .filter((c) => normalizeNullableText(c.Email, ""))
-    .map((contact) => {
+    .map((contact, index) => {
       const firstName = normalizeNullableText(contact.FirstName, "");
       const lastName = normalizeNullableText(contact.LastName, "");
       const fullName = [firstName, lastName].filter(Boolean).join(" ");
@@ -1036,15 +1060,18 @@ function buildStep4View(wizardId, contacts = [], options = {}) {
       const name = fullName || fallbackName;
       const email = normalizeNullableText(contact.Email, "");
       const label = `${name} - ${email}`.slice(0, 75);
-      const safeValue = email.slice(0, 75);
+      const optionId = `contact_${index}`;
+      contactEmails[optionId] = email;
       return {
         text: {
           type: "plain_text",
           text: label,
         },
-        value: safeValue,
+        value: optionId,
       };
     });
+  // Persist the id→email map (mutates the object held in wizardState).
+  state.contactEmails = contactEmails;
 
   if (contactOptions.length > 0) {
     blocks.push({
@@ -1310,7 +1337,7 @@ slackApp.command("/risk", async ({ command, ack, respond, client }) => {
   try {
     const loadingResult = await client.views.open({
       trigger_id,
-      view: buildLoadingView(mcNumber),
+      view: buildLoadingView(mcNumber, channel_id),
     });
     loadingViewId = loadingResult.view.id;
     setActiveAssessment(channel_id, user_id, mcNumber);
@@ -1337,10 +1364,20 @@ slackApp.command("/risk", async ({ command, ack, respond, client }) => {
       logger.error({ message: result.message }, "API error details");
     }
     clearActiveAssessment(channel_id);
-    await client.views.update({
-      view_id: loadingViewId,
-      view: buildSessionExpiredView("Error"),
-    });
+    // The user may have already cancelled the loading modal; updating a view
+    // that no longer exists rejects, and the global unhandledRejection handler
+    // would take the whole process down. Swallow that here.
+    try {
+      await client.views.update({
+        view_id: loadingViewId,
+        view: buildSessionExpiredView("Error"),
+      });
+    } catch (updateError) {
+      logger.warn(
+        { err: updateError, mcNumber },
+        "Failed to update loading modal with error view (likely already closed)",
+      );
+    }
     // Also send ephemeral so user sees the specific error
     await respond({ text: errorMessage, response_type: "ephemeral" });
     return;
@@ -1352,10 +1389,17 @@ slackApp.command("/risk", async ({ command, ack, respond, client }) => {
     (Array.isArray(carrierData) && carrierData.length === 0)
   ) {
     clearActiveAssessment(channel_id);
-    await client.views.update({
-      view_id: loadingViewId,
-      view: buildSessionExpiredView("No Data"),
-    });
+    try {
+      await client.views.update({
+        view_id: loadingViewId,
+        view: buildSessionExpiredView("No Data"),
+      });
+    } catch (updateError) {
+      logger.warn(
+        { err: updateError, mcNumber },
+        "Failed to update loading modal with no-data view (likely already closed)",
+      );
+    }
     await respond({
       text: "No data found for the provided MC number.",
       response_type: "ephemeral",
@@ -1379,11 +1423,13 @@ slackApp.command("/risk", async ({ command, ack, respond, client }) => {
         "Unknown Carrier",
       );
       const risk = data.RiskAssessmentDetails || {};
-      const totalPoints = risk.TotalPoints || 0;
+      const headerRisk = isRiskPointsAvailable(risk.TotalPoints)
+        ? `${getRiskLevelEmoji(Number(risk.TotalPoints))} ${getRiskLevel(Number(risk.TotalPoints))}`
+        : "⚠️ Risk data unavailable";
       await respond({
         response_type: "in_channel",
         replace_original: false,
-        text: `<@${user_id}> is reviewing ${carrierName} (MC${mcNumber}) - ${getRiskLevelEmoji(totalPoints)} ${getRiskLevel(totalPoints)}`,
+        text: `<@${user_id}> is reviewing ${carrierName} (MC${mcNumber}) - ${headerRisk}`,
         blocks: assessmentBlocks,
       });
       logger.info(
@@ -1743,8 +1789,8 @@ slackApp.action("wizard_decline", async ({ ack, body, client }) => {
 // Handle contact selection
 slackApp.action("select_contact", async ({ ack, body }) => {
   await ack();
-  const selectedEmail = body.actions[0].selected_option?.value;
-  if (selectedEmail) {
+  const selectedValue = body.actions[0].selected_option?.value;
+  if (selectedValue) {
     let wizardId;
     try {
       ({ wizardId } = JSON.parse(body.view.private_metadata));
@@ -1755,9 +1801,16 @@ slackApp.action("select_contact", async ({ ack, body }) => {
       );
       return;
     }
+    // Resolve the short option ID back to the full (untruncated) email.
+    // Fall back to the raw value for backward compatibility with any older view.
+    const state = wizardState.get(wizardId);
+    const selectedEmail = state?.contactEmails?.[selectedValue] || selectedValue;
     const stateKey = `${wizardId}_selected_email`;
     wizardState.set(stateKey, selectedEmail);
-    logger.info({ userId: body.user.id, selectedEmail }, "Contact selected");
+    logger.info(
+      { userId: body.user.id, selectedEmail: redactEmail(selectedEmail) },
+      "Contact selected",
+    );
   }
 });
 
@@ -1861,6 +1914,12 @@ slackApp.action("wizard_send_intellivite", async ({ ack, body, client }) => {
     } catch (error) {
       logger.error({ err: error }, "Failed to show error modal");
     }
+    // Replacing the interactive view with a static error view bypasses the
+    // Step 4 view_closed cleanup, so release the session here to avoid leaving
+    // the channel guarded until the 5-minute expiry.
+    wizardState.delete(stateKey);
+    wizardState.delete(wizardId);
+    clearActiveAssessment(channelId);
     return;
   }
 
@@ -1998,6 +2057,12 @@ slackApp.view("carrier_wizard_step4", async ({ ack, body, view, client }) => {
     } catch (error) {
       logger.error({ err: error }, "Failed to post error message");
     }
+    // The form was already acked, so the modal is closing without firing the
+    // view_closed cleanup path — release the session here so the channel isn't
+    // left guarded until the 5-minute expiry.
+    wizardState.delete(stateKey);
+    wizardState.delete(wizardId);
+    clearActiveAssessment(channelId);
     return;
   }
 
@@ -2092,8 +2157,14 @@ slackApp.view(
 
     try {
       const metadata = JSON.parse(view.private_metadata || "{}");
-      const { mcNumber } = metadata;
-      logger.info({ mcNumber }, "Loading modal closed by user");
+      const { mcNumber, channelId } = metadata;
+      // The channel guard is set as soon as the loading modal opens, so a user
+      // who cancels mid-fetch must release it — otherwise /risk stays blocked
+      // for that channel until the 5-minute expiry.
+      if (channelId) {
+        clearActiveAssessment(channelId);
+      }
+      logger.info({ mcNumber, channelId }, "Loading modal closed by user");
     } catch (error) {
       logger.error({ err: error }, "Error handling loading view close");
     }
@@ -2167,6 +2238,8 @@ if (typeof module !== "undefined") {
   module.exports = {
     getRiskLevelEmoji,
     getRiskLevel,
+    isRiskPointsAvailable,
+    formatRiskLevel,
     normalizeNullableText,
     normalizeMcInput,
     sanitizeHrefForSlack,
