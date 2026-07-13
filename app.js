@@ -146,6 +146,16 @@ function normalizeNullableText(value, fallback = "") {
   return text;
 }
 
+// Normalize a user-entered MC number from a Slack command.
+// Strips a leading "MC" token along with any common separators
+// (space, hyphen, hash, colon, period) so forms like "MC-1590727",
+// "MC 1590727", and "MC#1590727" all reduce to bare digits.
+function normalizeMcInput(text) {
+  return String(text ?? "")
+    .trim()
+    .replace(/^mc[\s#:.-]*/i, "");
+}
+
 function formatSlackLinks(text) {
   const input = normalizeNullableText(text, "");
   if (!input) return "";
@@ -1246,7 +1256,7 @@ slackApp.command("/risk", async ({ command, ack, respond, client }) => {
     return;
   }
 
-  const mcNumber = text.trim().replace(/^mc/i, "");
+  const mcNumber = normalizeMcInput(text);
 
   if (!/^\d{1,8}$/.test(mcNumber)) {
     await respond({
@@ -2112,6 +2122,7 @@ if (typeof module !== "undefined") {
     getRiskLevelEmoji,
     getRiskLevel,
     normalizeNullableText,
+    normalizeMcInput,
     formatSlackLinks,
     formatInfractionLine,
     chunkLines,
