@@ -11,9 +11,9 @@
 #   DSN source: your Sentry project (get DSN at https://sentry.io/settings/projects/).
 #
 # Hardening (recommended in GitHub UI):
-#   - Settings → Environments → production: restrict deployment branches to `socket-mode`,
+#   - Settings → Environments → production: restrict deployment branches to `master`,
 #     add required reviewers and/or wait timer so deploys need explicit approval.
-#   - Branch protection on `socket-mode` (reviews, no force-push).
+#   - Branch protection on `master` (reviews, no force-push).
 #   - Settings → Actions → Forks: require approval to run workflows from outside collaborators.
 #
 # To target only certain runners, replace `self-hosted` with your labels, e.g. [self-hosted, linux, mcp].
@@ -24,7 +24,7 @@ permissions:
 
 on:
   push:
-    branches: [socket-mode]
+    branches: [master]
   workflow_dispatch:
 
 concurrency:
@@ -33,7 +33,7 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.ref == 'refs/heads/socket-mode' && github.repository == 'freightCognition/mcp-slackbot' && github.event.repository.fork == false
+    if: github.ref == 'refs/heads/master' && github.repository == 'freightCognition/mcp-slackbot' && github.event.repository.fork == false
     runs-on: self-hosted
     environment: production
     timeout-minutes: 30
